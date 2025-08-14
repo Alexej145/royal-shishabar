@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Clock,
@@ -298,6 +298,19 @@ const OrderManagement: React.FC = () => {
     return statusMap[status];
   };
 
+  const displayedOrders = useMemo(() => {
+    const baseOrders = !filters.status
+      ? orders.filter((order) => order.status !== "delivered")
+      : orders;
+
+    // Sort by createdAt DESC (newest first)
+    return [...baseOrders].sort((a, b) => {
+      const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+      const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [orders, filters.status]);
+
   if (loading && orders.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -513,8 +526,7 @@ const OrderManagement: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-royal-gold/20">
-              {orders
-                .filter((order) => order.status !== "delivered")
+              {displayedOrders
                 .map((order) => {
                   const StatusIcon = statusIcons[order.status];
                   return (
@@ -666,7 +678,7 @@ const OrderManagement: React.FC = () => {
           </table>
         </div>
 
-        {orders.length === 0 && (
+        {displayedOrders.length === 0 && (
           <div className="text-center py-12">
             <Package className="w-16 h-16 mx-auto text-royal-cream/30 mb-4" />
             <p className="text-royal-cream/70">Keine Bestellungen gefunden</p>
