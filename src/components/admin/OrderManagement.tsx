@@ -26,6 +26,8 @@ import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import toast from "react-hot-toast";
 
+type TabType = "inProgress" | "completed";
+
 const OrderManagement: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [stats, setStats] = useState<OrderStats | null>(null);
@@ -33,6 +35,7 @@ const OrderManagement: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [filters, setFilters] = useState<OrderFilters>({});
   const [showFilters, setShowFilters] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>("inProgress");
 
   // CRITICAL FIX: Add state to track if component is mounted
   const [isMounted, setIsMounted] = useState(true);
@@ -59,6 +62,21 @@ const OrderManagement: React.FC = () => {
     ready: CheckCircle,
     delivered: CheckCircle,
     cancelled: XCircle,
+  };
+
+  // Define which statuses are considered "in progress" vs "completed"
+  const inProgressStatuses: OrderStatus[] = ["pending", "confirmed", "preparing", "ready"];
+  const completedStatuses: OrderStatus[] = ["delivered", "cancelled"];
+
+  // Filter orders based on active tab
+  const getFilteredOrders = () => {
+    const statusesToShow = activeTab === "inProgress" ? inProgressStatuses : completedStatuses;
+    return orders.filter(order => statusesToShow.includes(order.status));
+  };
+
+  // Check if an order can be deleted (only pending orders)
+  const canDeleteOrder = (order: Order) => {
+    return order.status === "pending";
   };
 
   // CRITICAL FIX: Set up component lifecycle
@@ -206,9 +224,22 @@ const OrderManagement: React.FC = () => {
     [isUpdating, isMounted, loadOrders, loadStats]
   );
 
-  // CRITICAL FIX: Prevent multiple simultaneous deletions
+  // CRITICAL FIX: Only allow deletion of pending orders
   const deleteOrder = useCallback(
     async (orderId: string) => {
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+
+      // Prevent deletion of confirmed, preparing, ready, delivered, or cancelled orders
+      if (!canDeleteOrder(order)) {
+        toast.error("Bestätigte, in Bearbeitung befindliche oder erledigte Bestellungen können nicht gelöscht werden");
+        return;
+      }
+
+      if (!window.confirm("Sind Sie sicher, dass Sie diese Bestellung löschen möchten?")) {
+        return;
+      }
+
       if (isUpdating) {
         toast.error(
           "Bitte warten Sie, bis die vorherige Aktion abgeschlossen ist"
@@ -216,9 +247,7 @@ const OrderManagement: React.FC = () => {
         return;
       }
 
-      if (
-        !confirm("Sind Sie sicher, dass Sie diese Bestellung löschen möchten?")
-      ) {
+      if (!window.confirm("Bestellung wirklich löschen?")) {
         return;
       }
 
@@ -244,7 +273,7 @@ const OrderManagement: React.FC = () => {
         }
       }
     },
-    [isUpdating, isMounted, loadOrders, loadStats]
+    [isUpdating, isMounted, orders, loadOrders, loadStats]
   );
 
   // CRITICAL FIX: Prevent multiple simultaneous loyalty verifications
@@ -298,6 +327,23 @@ const OrderManagement: React.FC = () => {
     return statusMap[status];
   };
 
+  // Get tab-specific stats
+  const getTabStats = () => {
+    if (!stats) return { count: 0, revenue: 0 };
+    
+    if (activeTab === "inProgress") {
+      return {
+        count: stats.pendingOrders + stats.preparingOrders + stats.readyOrders,
+        revenue: stats.unpaidRevenue
+      };
+    } else {
+      return {
+        count: stats.deliveredOrders + stats.cancelledOrders,
+        revenue: stats.paidRevenue
+      };
+    }
+  };
+
   if (loading && orders.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -305,6 +351,9 @@ const OrderManagement: React.FC = () => {
       </div>
     );
   }
+
+  const filteredOrders = getFilteredOrders();
+  const tabStats = getTabStats();
 
   return (
     <div className="space-y-6">
@@ -327,79 +376,110 @@ const OrderManagement: React.FC = () => {
         </button>
       </div>
 
-      {/* Statistics */}
-      {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
+      {/* Tab Navigation */}
+      <div className="bg-royal-charcoal-dark rounded-royal p-1">
+        <div className="flex space-x-1">
+          <button
+            onClick={() => setActiveTab("inProgress")}
+            className={`flex-1 flex items-center justify-center space-x-2 px-4 py-3 rounded-royal transition-all duration-200 ${
+              activeTab === "inProgress"
+                ? "bg-royal-gradient-gold text-royal-charcoal royal-glow"
+                : "text-royal-cream hover:bg-royal-charcoal"
+            }`}
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-royal-cream/70">
-                  Gesamtbestellungen
-                </p>
-                <p className="text-2xl font-bold text-royal-cream">
-                  {stats.totalOrders}
-                </p>
-              </div>
-              <Package className="w-8 h-8 text-royal-gold" />
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
+            <Clock className="w-4 h-4" />
+            <span className="font-medium">In Arbeit</span>
+            <span className={`px-2 py-1 rounded-full text-xs ${
+              activeTab === "inProgress" 
+                ? "bg-royal-charcoal/20 text-royal-charcoal"
+                : "bg-royal-gold/20 text-royal-gold"
+            }`}>
+              {stats ? (stats.pendingOrders + stats.preparingOrders + stats.readyOrders) : 0}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("completed")}
+            className={`flex-1 flex items-center justify-center space-x-2 px-4 py-3 rounded-royal transition-all duration-200 ${
+              activeTab === "completed"
+                ? "bg-royal-gradient-gold text-royal-charcoal royal-glow"
+                : "text-royal-cream hover:bg-royal-charcoal"
+            }`}
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-royal-cream/70">Ausstehend</p>
-                <p className="text-2xl font-bold text-royal-gold">
-                  {stats.pendingOrders}
-                </p>
-              </div>
-              <Clock className="w-8 h-8 text-royal-gold" />
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-royal-cream/70">Gesamtumsatz</p>
-                <p className="text-2xl font-bold text-royal-gold">
-                  {stats.totalRevenue.toFixed(2)}€
-                </p>
-              </div>
-              <Euro className="w-8 h-8 text-royal-gold" />
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-royal-cream/70">Ø Bestellwert</p>
-                <p className="text-2xl font-bold text-royal-cream">
-                  {stats.averageOrderValue.toFixed(2)}€
-                </p>
-              </div>
-              <TrendingUp className="w-8 h-8 text-royal-gold" />
-            </div>
-          </motion.div>
+            <CheckCircle className="w-4 h-4" />
+            <span className="font-medium">Erledigt</span>
+            <span className={`px-2 py-1 rounded-full text-xs ${
+              activeTab === "completed" 
+                ? "bg-royal-charcoal/20 text-royal-charcoal"
+                : "bg-royal-gold/20 text-royal-gold"
+            }`}>
+              {stats ? (stats.deliveredOrders + stats.cancelledOrders) : 0}
+            </span>
+          </button>
         </div>
-      )}
+      </div>
+
+      {/* Tab-specific Statistics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-royal-cream/70">
+                {activeTab === "inProgress" ? "Bestellungen in Arbeit" : "Erledigte Bestellungen"}
+              </p>
+              <p className="text-2xl font-bold text-royal-cream">
+                {tabStats.count}
+              </p>
+            </div>
+            {activeTab === "inProgress" ? (
+              <Clock className="w-8 h-8 text-royal-gold" />
+            ) : (
+              <CheckCircle className="w-8 h-8 text-green-500" />
+            )}
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-royal-cream/70">
+                {activeTab === "inProgress" ? "Offener Umsatz" : "Erzielter Umsatz"}
+              </p>
+              <p className="text-2xl font-bold text-royal-cream">
+                €{tabStats.revenue.toFixed(2)}
+              </p>
+            </div>
+            <Euro className="w-8 h-8 text-royal-gold" />
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-royal-cream/70">
+                Durchschnittlicher Bestellwert
+              </p>
+              <p className="text-2xl font-bold text-royal-cream">
+                €{stats ? stats.averageOrderValue.toFixed(2) : '0.00'}
+              </p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-royal-gold" />
+          </div>
+        </motion.div>
+      </div>
 
       {/* Filters */}
       <div className="bg-royal-charcoal-dark p-4 rounded-royal shadow-md border border-royal-gold/30 royal-glow">
@@ -513,8 +593,7 @@ const OrderManagement: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-royal-gold/20">
-              {orders
-                .filter((order) => order.status !== "delivered")
+              {filteredOrders
                 .map((order) => {
                   const StatusIcon = statusIcons[order.status];
                   return (
@@ -600,63 +679,96 @@ const OrderManagement: React.FC = () => {
                             <Eye className="w-5 h-5 mr-1" />
                             Details
                           </button>
-                          {order.status === "pending" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "confirmed")
-                              }
-                              className="p-2 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <CheckCircle className="w-5 h-5 mr-1" />
-                              Bestätigen
-                            </button>
+
+                          {/* Show action buttons only for "In Arbeit" tab */}
+                          {activeTab === "inProgress" && (
+                            <>
+                              {order.status === "pending" && (
+                                <>
+                                  <button
+                                    onClick={() =>
+                                      updateOrderStatus(order.id, "confirmed")
+                                    }
+                                    className="p-2 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center min-h-[44px]"
+                                    style={{ fontSize: 16 }}
+                                  >
+                                    <CheckCircle className="w-5 h-5 mr-1" />
+                                    Bestätigen
+                                  </button>
+                                  {canDeleteOrder(order) && (
+                                    <button
+                                      onClick={() => deleteOrder(order.id)}
+                                      className="p-2 rounded bg-red-100 text-red-600 hover:bg-red-200 flex items-center justify-center min-h-[44px]"
+                                      style={{ fontSize: 16 }}
+                                      title="Bestellung löschen"
+                                    >
+                                      <Trash2 className="w-5 h-5 mr-1" />
+                                      Löschen
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {order.status === "confirmed" && (
+                                <button
+                                  onClick={() =>
+                                    updateOrderStatus(order.id, "preparing")
+                                  }
+                                  className="p-2 rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center justify-center min-h-[44px]"
+                                  style={{ fontSize: 16 }}
+                                >
+                                  <RefreshCw className="w-5 h-5 mr-1" />
+                                  Zubereitung starten
+                                </button>
+                              )}
+                              {order.status === "preparing" && (
+                                <button
+                                  onClick={() =>
+                                    updateOrderStatus(order.id, "ready")
+                                  }
+                                  className="p-2 rounded bg-green-600 text-white hover:bg-green-700 flex items-center justify-center min-h-[44px]"
+                                  style={{ fontSize: 16 }}
+                                >
+                                  <CheckCircle className="w-5 h-5 mr-1" />
+                                  Bereit
+                                </button>
+                              )}
+                              {order.status === "ready" && (
+                                <button
+                                  onClick={() =>
+                                    updateOrderStatus(order.id, "delivered")
+                                  }
+                                  className="p-2 rounded bg-royal-charcoal text-royal-cream hover:bg-royal-charcoal/80 flex items-center justify-center min-h-[44px]"
+                                  style={{ fontSize: 16 }}
+                                >
+                                  <Package className="w-5 h-5 mr-1" />
+                                  Ausliefern
+                                </button>
+                              )}
+                            </>
                           )}
-                          {order.status === "confirmed" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "preparing")
-                              }
-                              className="p-2 rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <RefreshCw className="w-5 h-5 mr-1" />
-                              Zubereitung starten
-                            </button>
+
+                          {/* Show limited actions for "Erledigt" tab */}
+                          {activeTab === "completed" && (
+                            <>
+                              {order.status === "cancelled" && (
+                                <button
+                                  onClick={() => deleteOrder(order.id)}
+                                  className="p-2 rounded bg-red-100 text-red-600 hover:bg-red-200 flex items-center justify-center min-h-[44px]"
+                                  style={{ fontSize: 16 }}
+                                  title="Stornierte Bestellung endgültig löschen"
+                                >
+                                  <Trash2 className="w-5 h-5 mr-1" />
+                                  Löschen
+                                </button>
+                              )}
+                              {order.status === "delivered" && (
+                                <span className="p-2 rounded bg-green-100 text-green-600 flex items-center justify-center min-h-[44px] text-sm">
+                                  <CheckCircle className="w-4 h-4 mr-1" />
+                                  Abgeschlossen
+                                </span>
+                              )}
+                            </>
                           )}
-                          {order.status === "preparing" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "ready")
-                              }
-                              className="p-2 rounded bg-green-600 text-white hover:bg-green-700 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <CheckCircle className="w-5 h-5 mr-1" />
-                              Bereit
-                            </button>
-                          )}
-                          {order.status === "ready" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "delivered")
-                              }
-                              className="p-2 rounded bg-royal-charcoal text-royal-cream hover:bg-royal-charcoal/80 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <Package className="w-5 h-5 mr-1" />
-                              Ausliefern
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deleteOrder(order.id)}
-                            className="p-2 rounded bg-red-100 text-red-600 hover:bg-red-200 flex items-center justify-center min-h-[44px]"
-                            style={{ fontSize: 16 }}
-                            title="Bestellung löschen"
-                          >
-                            <Trash2 className="w-5 h-5 mr-1" />
-                            Löschen
-                          </button>
                         </div>
                       </td>
                     </motion.tr>
@@ -666,10 +778,25 @@ const OrderManagement: React.FC = () => {
           </table>
         </div>
 
-        {orders.length === 0 && (
+        {filteredOrders.length === 0 && (
           <div className="text-center py-12">
-            <Package className="w-16 h-16 mx-auto text-royal-cream/30 mb-4" />
-            <p className="text-royal-cream/70">Keine Bestellungen gefunden</p>
+            {activeTab === "inProgress" ? (
+              <>
+                <Clock className="w-16 h-16 mx-auto text-royal-cream/30 mb-4" />
+                <p className="text-royal-cream/70">Keine Bestellungen in Arbeit</p>
+                <p className="text-royal-cream/50 text-sm mt-2">
+                  Alle aktuellen Bestellungen wurden bereits bearbeitet.
+                </p>
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-16 h-16 mx-auto text-royal-cream/30 mb-4" />
+                <p className="text-royal-cream/70">Keine erledigten Bestellungen</p>
+                <p className="text-royal-cream/50 text-sm mt-2">
+                  Hier werden ausgelieferte und stornierte Bestellungen angezeigt.
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>
