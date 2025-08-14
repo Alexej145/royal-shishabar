@@ -547,15 +547,32 @@ const OrderManagement: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-sm text-royal-cream/70">
-                          <p>{getTotalItems(order)} Artikel</p>
-                          <p className="text-xs">
-                            {order.items
-                              .slice(0, 2)
-                              .map((item) => item.name)
-                              .join(", ")}
-                            {order.items.length > 2 && "..."}
+                        <div className="text-sm text-royal-cream/70 max-w-xs">
+                          <p className="font-medium text-royal-cream mb-1">
+                            {getTotalItems(order)} Artikel
                           </p>
+                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                            {order.items.map((item, index) => (
+                              <div key={index} className="flex flex-col text-xs">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium text-royal-cream">
+                                    {item.quantity}x {item.name}
+                                  </span>
+                                  <span className="text-royal-gold font-medium">
+                                    {(item.price * item.quantity).toFixed(2)}€
+                                  </span>
+                                </div>
+                                <span className="text-royal-cream/50 text-xs">
+                                  {item.category}
+                                </span>
+                                {item.specialInstructions && (
+                                  <span className="text-royal-gold/70 text-xs italic">
+                                    Anweisung: {item.specialInstructions}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3">
