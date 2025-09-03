@@ -19,7 +19,7 @@ import AdminGDPRDashboard from "../components/gdpr/AdminGDPRDashboard";
 import OrderReports from "../components/admin/OrderReports";
 import { motion } from "framer-motion";
 import { Table } from "../types/reservation";
-import { Order } from "../types/order";
+import { Order, OrderStatus, PaymentStatus } from "../types/order";
 import { OrderService } from "../services/orderService";
 import {
   Users,
@@ -56,7 +56,8 @@ import {
 const Admin: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isEventsLoading, setIsEventsLoading] = useState(false);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [tableOrders, setTableOrders] = useState<Order[]>([]);
@@ -85,27 +86,27 @@ const Admin: React.FC = () => {
 
   const loadEvents = async () => {
     try {
-      setIsLoading(true);
+      setIsEventsLoading(true);
       const eventsData = await EventService.getEvents();
       setEvents(eventsData);
     } catch (error) {
       toast.error("Failed to load events");
       console.error("Error loading events:", error);
     } finally {
-      setIsLoading(false);
+      setIsEventsLoading(false);
     }
   };
 
   const loadAnalytics = async () => {
     try {
-      setIsLoading(true);
+      setIsAnalyticsLoading(true);
       const data = await AnalyticsService.getAnalyticsData();
       setAnalyticsData(data);
     } catch (error) {
       console.error("Error loading analytics:", error);
       toast.error("Failed to load analytics data");
     } finally {
-      setIsLoading(false);
+      setIsAnalyticsLoading(false);
     }
   };
 
@@ -136,7 +137,7 @@ const Admin: React.FC = () => {
     newStatus: string
   ) => {
     try {
-      await OrderService.updateOrderStatus(orderId, newStatus as any);
+      await OrderService.updateOrderStatus(orderId, newStatus as OrderStatus);
       toast.success(`Bestellstatus zu "${newStatus}" geändert`);
 
       // Reload table orders
@@ -157,7 +158,10 @@ const Admin: React.FC = () => {
     paymentStatus: string
   ) => {
     try {
-      await OrderService.updatePaymentStatus(orderId, paymentStatus as any);
+      await OrderService.updatePaymentStatus(
+        orderId,
+        paymentStatus as PaymentStatus
+      );
       toast.success(`Zahlungsstatus zu "${paymentStatus}" geändert`);
 
       // Reload table orders
@@ -475,7 +479,7 @@ const Admin: React.FC = () => {
         </button>
       </div>
 
-      {isLoading ? (
+      {isEventsLoading ? (
         <LoadingSpinner />
       ) : (
         <div className="bg-royal-charcoal rounded-lg border border-royal-gold/20 overflow-hidden">
@@ -605,135 +609,153 @@ const Admin: React.FC = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
-          <h3 className="text-lg font-semibold text-royal-cream mb-4">
-            Revenue Analytics
-          </h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">This Month</span>
-              <span className="text-royal-gold font-semibold">
-                €{analyticsData.thisMonthRevenue.toLocaleString()}
-              </span>
+      {isAnalyticsLoading ? (
+        <LoadingSpinner />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
+              <h3 className="text-lg font-semibold text-royal-cream mb-4">
+                Revenue Analytics
+              </h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">This Month</span>
+                  <span className="text-royal-gold font-semibold">
+                    €{analyticsData.thisMonthRevenue.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">Last Month</span>
+                  <span className="text-royal-gold font-semibold">
+                    €{analyticsData.lastMonthRevenue.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">Growth</span>
+                  <span
+                    className={`font-semibold ${
+                      analyticsData.revenueGrowth >= 0
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }`}
+                  >
+                    {analyticsData.revenueGrowth >= 0 ? "+" : ""}
+                    {analyticsData.revenueGrowth}%
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Last Month</span>
-              <span className="text-royal-gold font-semibold">
-                €{analyticsData.lastMonthRevenue.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Growth</span>
-              <span
-                className={`font-semibold ${
-                  analyticsData.revenueGrowth >= 0
-                    ? "text-green-400"
-                    : "text-red-400"
-                }`}
-              >
-                {analyticsData.revenueGrowth >= 0 ? "+" : ""}
-                {analyticsData.revenueGrowth}%
-              </span>
-            </div>
-          </div>
-        </div>
 
-        <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
-          <h3 className="text-lg font-semibold text-royal-cream mb-4">
-            User Analytics
-          </h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">New Users (30d)</span>
-              <span className="text-royal-gold font-semibold">
-                +{analyticsData.newUsersThisMonth}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Active Users</span>
-              <span className="text-royal-gold font-semibold">
-                {analyticsData.activeUsersCount}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Engagement Rate</span>
-              <span className="text-green-400 font-semibold">
-                {analyticsData.engagementRate}%
-              </span>
+            <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
+              <h3 className="text-lg font-semibold text-royal-cream mb-4">
+                User Analytics
+              </h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    New Users (30d)
+                  </span>
+                  <span className="text-royal-gold font-semibold">
+                    +{analyticsData.newUsersThisMonth}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">Active Users</span>
+                  <span className="text-royal-gold font-semibold">
+                    {analyticsData.activeUsersCount}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    Engagement Rate
+                  </span>
+                  <span className="text-green-400 font-semibold">
+                    {analyticsData.engagementRate}%
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Additional Analytics Sections */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
-          <h3 className="text-lg font-semibold text-royal-cream mb-4">
-            Order Analytics
-          </h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Total Orders</span>
-              <span className="text-royal-gold font-semibold">
-                {analyticsData.totalOrders}
-              </span>
+          {/* Additional Analytics Sections */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
+              <h3 className="text-lg font-semibold text-royal-cream mb-4">
+                Order Analytics
+              </h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">Total Orders</span>
+                  <span className="text-royal-gold font-semibold">
+                    {analyticsData.totalOrders}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">Pending Orders</span>
+                  <span className="text-yellow-400 font-semibold">
+                    {analyticsData.pendingOrders}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    Delivered Orders
+                  </span>
+                  <span className="text-green-400 font-semibold">
+                    {analyticsData.deliveredOrders}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    Average Order Value
+                  </span>
+                  <span className="text-royal-gold font-semibold">
+                    €{analyticsData.averageOrderValue.toFixed(2)}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Pending Orders</span>
-              <span className="text-yellow-400 font-semibold">
-                {analyticsData.pendingOrders}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Delivered Orders</span>
-              <span className="text-green-400 font-semibold">
-                {analyticsData.deliveredOrders}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">
-                Average Order Value
-              </span>
-              <span className="text-royal-gold font-semibold">
-                €{analyticsData.averageOrderValue.toFixed(2)}
-              </span>
-            </div>
-          </div>
-        </div>
 
-        <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
-          <h3 className="text-lg font-semibold text-royal-cream mb-4">
-            Event Analytics
-          </h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Total Events</span>
-              <span className="text-royal-gold font-semibold">
-                {analyticsData.totalEvents}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Upcoming Events</span>
-              <span className="text-blue-400 font-semibold">
-                {analyticsData.upcomingEvents}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Total Attendees</span>
-              <span className="text-royal-gold font-semibold">
-                {analyticsData.totalAttendees}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-royal-cream-light">Event Engagement</span>
-              <span className="text-green-400 font-semibold">
-                {analyticsData.eventEngagement.toFixed(1)}
-              </span>
+            <div className="bg-royal-charcoal p-6 rounded-lg border border-royal-gold/20 royal-glow">
+              <h3 className="text-lg font-semibold text-royal-cream mb-4">
+                Event Analytics
+              </h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">Total Events</span>
+                  <span className="text-royal-gold font-semibold">
+                    {analyticsData.totalEvents}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    Upcoming Events
+                  </span>
+                  <span className="text-blue-400 font-semibold">
+                    {analyticsData.upcomingEvents}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    Total Attendees
+                  </span>
+                  <span className="text-royal-gold font-semibold">
+                    {analyticsData.totalAttendees}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-royal-cream-light">
+                    Event Engagement
+                  </span>
+                  <span className="text-green-400 font-semibold">
+                    {analyticsData.eventEngagement.toFixed(1)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 
@@ -985,13 +1007,13 @@ const Admin: React.FC = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Kapazität:</span>
-                    <span className="font-medium">
+                    <span className="font-medium text-black">
                       {selectedTable.capacity} Personen
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Bereich:</span>
-                    <span className="font-medium">
+                    <span className="font-medium text-black">
                       {selectedTable.location === "vip"
                         ? "VIP"
                         : selectedTable.location === "outdoor"
@@ -1001,7 +1023,7 @@ const Admin: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Preismultiplikator:</span>
-                    <span className="font-medium">
+                    <span className="font-medium text-black">
                       {selectedTable.priceMultiplier}x
                     </span>
                   </div>
@@ -1025,7 +1047,9 @@ const Admin: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Bestellungen:</span>
-                    <span className="font-medium">{tableOrders.length}</span>
+                    <span className="font-medium text-black">
+                      {tableOrders.length}
+                    </span>
                   </div>
                 </div>
               </div>

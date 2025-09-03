@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Crown,
@@ -32,6 +32,51 @@ const Loyalty = () => {
   const [showPhonePrompt, setShowPhonePrompt] = useState(false);
   const [newPhone, setNewPhone] = useState("");
 
+  // Stable loader used by other callbacks
+  const loadTransactions = useCallback(async (cardId: string) => {
+    setLoading(true);
+    try {
+      const cardTransactions = await LoyaltyService.getLoyaltyTransactions(
+        cardId
+      );
+      setTransactions(cardTransactions);
+    } catch (error) {
+      console.error("Error loading transactions:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Search for a user's loyalty card (stable callback)
+  const searchUserLoyaltyCard = useCallback(
+    async (phone: string) => {
+      setLoading(true);
+      try {
+        const card = await LoyaltyService.searchLoyaltyCardByPhone(phone);
+        if (card) {
+          setLoyaltyCard(card);
+          loadTransactions(card.id);
+          toast.success("Ihr Stempelpass wurde gefunden!");
+        } else {
+          // No existing card, create one automatically
+          const newCard = await LoyaltyService.getOrCreateLoyaltyCard(
+            phone,
+            user!.name
+          );
+          setLoyaltyCard(newCard);
+          loadTransactions(newCard.id);
+          toast.success("Neuer Stempelpass erstellt!");
+        }
+      } catch (error) {
+        console.error("Error searching user loyalty card:", error);
+        toast.error("Fehler beim Laden Ihres Stempelpasses");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user, loadTransactions]
+  );
+
   // Check for authenticated user's loyalty card on mount
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -43,33 +88,7 @@ const Loyalty = () => {
         setShowPhonePrompt(true);
       }
     }
-  }, [isAuthenticated, user]);
-
-  const searchUserLoyaltyCard = async (phone: string) => {
-    setLoading(true);
-    try {
-      const card = await LoyaltyService.searchLoyaltyCardByPhone(phone);
-      if (card) {
-        setLoyaltyCard(card);
-        loadTransactions(card.id);
-        toast.success("Ihr Stempelpass wurde gefunden!");
-      } else {
-        // No existing card, create one automatically
-        const newCard = await LoyaltyService.getOrCreateLoyaltyCard(
-          phone,
-          user!.name
-        );
-        setLoyaltyCard(newCard);
-        loadTransactions(newCard.id);
-        toast.success("Neuer Stempelpass erstellt!");
-      }
-    } catch (error) {
-      console.error("Error searching user loyalty card:", error);
-      toast.error("Fehler beim Laden Ihres Stempelpasses");
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [isAuthenticated, user, searchUserLoyaltyCard]);
 
   const handlePhoneUpdate = async () => {
     if (!newPhone.trim()) {
@@ -100,20 +119,6 @@ const Loyalty = () => {
   const handleCardSelected = async (card: LoyaltyCardType) => {
     setLoyaltyCard(card);
     loadTransactions(card.id);
-  };
-
-  const loadTransactions = async (cardId: string) => {
-    setLoading(true);
-    try {
-      const cardTransactions = await LoyaltyService.getLoyaltyTransactions(
-        cardId
-      );
-      setTransactions(cardTransactions);
-    } catch (error) {
-      console.error("Error loading transactions:", error);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const getTransactionIcon = (type: LoyaltyTransaction["type"]) => {

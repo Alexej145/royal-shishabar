@@ -226,7 +226,11 @@ const Menu = () => {
                       {item.name}
                     </h3>
                     <span className="text-2xl font-bold text-royal-gold">
-                      {(typeof item.price === 'number' ? item.price : parseFloat(item.price) || 0).toFixed(2)}€
+                      {(typeof item.price === "number"
+                        ? item.price
+                        : parseFloat(item.price) || 0
+                      ).toFixed(2)}
+                      €
                     </span>
                   </div>
 

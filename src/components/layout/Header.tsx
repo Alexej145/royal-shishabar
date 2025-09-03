@@ -45,7 +45,7 @@ const Header: React.FC = () => {
       toast.success("Successfully logged out!");
       setIsUserMenuOpen(false);
       navigate("/");
-    } catch (error: unknown) {
+    } catch {
       toast.error("Logout failed. Please try again.");
     }
   };

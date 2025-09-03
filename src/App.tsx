@@ -18,6 +18,7 @@ import Impressum from "./components/gdpr/Impressum";
 import AGB from "./components/gdpr/AGB";
 import Header from "./components/layout/Header";
 import Footer from "./components/layout/Footer";
+import SocialBar from "./components/common/SocialBar";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PerformanceMonitor from "./components/common/PerformanceMonitor";
 import AdminSetupButton from "./components/common/AdminSetupButton";
@@ -48,6 +49,7 @@ function App() {
           <CartProvider>
             <div className="flex flex-col min-h-screen bg-royal-charcoal">
               <Header />
+              <SocialBar />
               <OfflineIndicator />
               <main className="flex-grow">
                 <ErrorBoundary>

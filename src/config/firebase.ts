@@ -1,6 +1,11 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { 
+  getFirestore, 
+  Firestore,
+  enableIndexedDbPersistence,
+  enableMultiTabIndexedDbPersistence
+} from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -51,6 +56,22 @@ export const getFirestoreDB = (): Firestore => {
   if (!dbInstance) {
     const firebaseApp = getFirebaseApp();
     dbInstance = getFirestore(firebaseApp);
+
+    // Enable offline persistence for durability and queued writes
+    // Try single-tab persistence first; fall back to multi-tab if needed
+    enableIndexedDbPersistence(dbInstance).catch(async (err: any) => {
+      if (err?.code === 'failed-precondition') {
+        // If multiple tabs are open, fall back to multi-tab persistence
+        try {
+          await enableMultiTabIndexedDbPersistence(dbInstance);
+          console.log('Firestore multi-tab persistence enabled');
+        } catch (e) {
+          console.warn('Firestore persistence not available (multi-tab fallback failed):', e);
+        }
+      } else {
+        console.warn('Firestore persistence not available:', err);
+      }
+    });
   }
   return dbInstance;
 };

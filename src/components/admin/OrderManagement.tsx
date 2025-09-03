@@ -28,6 +28,8 @@ import toast from "react-hot-toast";
 
 const OrderManagement: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [showConfirmed, setShowConfirmed] = useState(false);
   const [stats, setStats] = useState<OrderStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -298,6 +300,16 @@ const OrderManagement: React.FC = () => {
     return statusMap[status];
   };
 
+  // Compute the orders visible in the main table based on toggles
+  const visibleOrders = showCompleted
+    ? orders.filter((o) => o.status === "delivered" || o.status === "cancelled")
+    : orders.filter(
+        (order) =>
+          order.status !== "delivered" &&
+          order.status !== "cancelled" &&
+          (showConfirmed || order.status !== "confirmed")
+      );
+
   if (loading && orders.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -318,13 +330,35 @@ const OrderManagement: React.FC = () => {
             Verwalten Sie alle Kundenbestellungen und deren Status
           </p>
         </div>
-        <button
-          onClick={loadOrders}
-          className="bg-royal-gradient-gold text-royal-charcoal px-4 py-2 rounded-royal royal-glow hover:shadow-lg transition-all duration-300 flex items-center space-x-2"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span>Aktualisieren</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setShowConfirmed((v) => !v)}
+            className={`px-4 py-2 rounded-royal border border-royal-gold/30 text-royal-gold bg-royal-charcoal/5 hover:bg-royal-charcoal/10 transition-all duration-200 ${
+              showConfirmed ? "font-bold" : ""
+            }`}
+            title="Zeigt bestätigte Bestellungen an"
+          >
+            {showConfirmed ? "Bestätigte ausblenden" : "Bestätigte anzeigen"}
+          </button>
+
+          <button
+            onClick={() => setShowCompleted((v) => !v)}
+            className={`px-4 py-2 rounded-royal border border-royal-gold/30 text-royal-gold bg-royal-charcoal/5 hover:bg-royal-charcoal/10 transition-all duration-200 ${
+              showCompleted ? "font-bold" : ""
+            }`}
+            title="Wechselt zur Ansicht erledigter Bestellungen"
+          >
+            {showCompleted ? "Offene Bestellungen" : "Erledigte Bestellungen"}
+          </button>
+
+          <button
+            onClick={loadOrders}
+            className="bg-royal-gradient-gold text-royal-charcoal px-4 py-2 rounded-royal royal-glow hover:shadow-lg transition-all duration-300 flex items-center space-x-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Aktualisieren</span>
+          </button>
+        </div>
       </div>
 
       {/* Statistics */}
@@ -513,160 +547,156 @@ const OrderManagement: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-royal-gold/20">
-              {orders
-                .filter((order) => order.status !== "delivered")
-                .map((order) => {
-                  const StatusIcon = statusIcons[order.status];
-                  return (
-                    <motion.tr
-                      key={order.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="hover:bg-royal-charcoal/5 transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-sm text-royal-cream/70">
-                          #{order.id.slice(-8)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="bg-royal-gold/20 text-royal-gold px-2 py-1 rounded-full text-sm font-semibold">
-                          Tisch {order.tableNumber}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div>
-                          <p className="font-medium text-royal-cream">
-                            {order.customerName || "Anonym"}
+              {visibleOrders.map((order) => {
+                const StatusIcon = statusIcons[order.status];
+                return (
+                  <motion.tr
+                    key={order.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="hover:bg-royal-charcoal/5 transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-sm text-royal-cream/70">
+                        #{order.id.slice(-8)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="bg-royal-gold/20 text-royal-gold px-2 py-1 rounded-full text-sm font-semibold">
+                        Tisch {order.tableNumber}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="font-medium text-royal-cream">
+                          {order.customerName || "Anonym"}
+                        </p>
+                        {order.customerPhone && (
+                          <p className="text-sm text-royal-cream/70">
+                            {order.customerPhone}
                           </p>
-                          {order.customerPhone && (
-                            <p className="text-sm text-royal-cream/70">
-                              {order.customerPhone}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm text-royal-cream/70">
-                          <p>{getTotalItems(order)} Artikel</p>
-                          <p className="text-xs">
-                            {order.items
-                              .slice(0, 2)
-                              .map((item) => item.name)
-                              .join(", ")}
-                            {order.items.length > 2 && "..."}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-bold text-royal-gold">
-                            {order.totalAmount.toFixed(2)}€
-                          </span>
-                          {/* Loyalty Badge */}
-                          {order.loyaltyDiscount && (
-                            <div className="flex items-center space-x-1 bg-royal-purple text-white px-2 py-1 rounded-full text-xs">
-                              <Crown className="w-3 h-3" />
-                              <span>
-                                -{order.loyaltyDiscount.amount.toFixed(2)}€
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            statusColors[order.status]
-                          }`}
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm text-royal-cream/70">
+                        <p>{getTotalItems(order)} Artikel</p>
+                        <p className="text-xs">
+                          {order.items
+                            .slice(0, 2)
+                            .map((item) => item.name)
+                            .join(", ")}
+                          {order.items.length > 2 && "..."}
+                        </p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-royal-gold">
+                          {order.totalAmount.toFixed(2)}€
+                        </span>
+                        {/* Loyalty Badge */}
+                        {order.loyaltyDiscount && (
+                          <div className="flex items-center space-x-1 bg-royal-purple text-white px-2 py-1 rounded-full text-xs">
+                            <Crown className="w-3 h-3" />
+                            <span>
+                              -{order.loyaltyDiscount.amount.toFixed(2)}€
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                          statusColors[order.status]
+                        }`}
+                      >
+                        <StatusIcon className="w-3 h-3 mr-1" />
+                        {formatStatus(order.status)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-royal-cream/70">
+                      {format(order.createdAt, "dd.MM.yyyy HH:mm", {
+                        locale: de,
+                      })}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col space-y-2">
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="p-2 rounded bg-royal-gold/20 text-royal-gold hover:bg-royal-gold/30 flex items-center justify-center min-h-[44px]"
+                          title="Details anzeigen"
+                          style={{ fontSize: 16 }}
                         >
-                          <StatusIcon className="w-3 h-3 mr-1" />
-                          {formatStatus(order.status)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-royal-cream/70">
-                        {format(order.createdAt, "dd.MM.yyyy HH:mm", {
-                          locale: de,
-                        })}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col space-y-2">
+                          <Eye className="w-5 h-5 mr-1" />
+                          Details
+                        </button>
+                        {order.status === "pending" && (
                           <button
-                            onClick={() => setSelectedOrder(order)}
-                            className="p-2 rounded bg-royal-gold/20 text-royal-gold hover:bg-royal-gold/30 flex items-center justify-center min-h-[44px]"
-                            title="Details anzeigen"
+                            onClick={() =>
+                              updateOrderStatus(order.id, "confirmed")
+                            }
+                            className="p-2 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center min-h-[44px]"
                             style={{ fontSize: 16 }}
                           >
-                            <Eye className="w-5 h-5 mr-1" />
-                            Details
+                            <CheckCircle className="w-5 h-5 mr-1" />
+                            Bestätigen
                           </button>
-                          {order.status === "pending" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "confirmed")
-                              }
-                              className="p-2 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <CheckCircle className="w-5 h-5 mr-1" />
-                              Bestätigen
-                            </button>
-                          )}
-                          {order.status === "confirmed" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "preparing")
-                              }
-                              className="p-2 rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <RefreshCw className="w-5 h-5 mr-1" />
-                              Zubereitung starten
-                            </button>
-                          )}
-                          {order.status === "preparing" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "ready")
-                              }
-                              className="p-2 rounded bg-green-600 text-white hover:bg-green-700 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <CheckCircle className="w-5 h-5 mr-1" />
-                              Bereit
-                            </button>
-                          )}
-                          {order.status === "ready" && (
-                            <button
-                              onClick={() =>
-                                updateOrderStatus(order.id, "delivered")
-                              }
-                              className="p-2 rounded bg-royal-charcoal text-royal-cream hover:bg-royal-charcoal/80 flex items-center justify-center min-h-[44px]"
-                              style={{ fontSize: 16 }}
-                            >
-                              <Package className="w-5 h-5 mr-1" />
-                              Ausliefern
-                            </button>
-                          )}
+                        )}
+                        {order.status === "confirmed" && (
                           <button
-                            onClick={() => deleteOrder(order.id)}
-                            className="p-2 rounded bg-red-100 text-red-600 hover:bg-red-200 flex items-center justify-center min-h-[44px]"
+                            onClick={() =>
+                              updateOrderStatus(order.id, "preparing")
+                            }
+                            className="p-2 rounded bg-purple-600 text-white hover:bg-purple-700 flex items-center justify-center min-h-[44px]"
                             style={{ fontSize: 16 }}
-                            title="Bestellung löschen"
                           >
-                            <Trash2 className="w-5 h-5 mr-1" />
-                            Löschen
+                            <RefreshCw className="w-5 h-5 mr-1" />
+                            Zubereitung starten
                           </button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  );
-                })}
+                        )}
+                        {order.status === "preparing" && (
+                          <button
+                            onClick={() => updateOrderStatus(order.id, "ready")}
+                            className="p-2 rounded bg-green-600 text-white hover:bg-green-700 flex items-center justify-center min-h-[44px]"
+                            style={{ fontSize: 16 }}
+                          >
+                            <CheckCircle className="w-5 h-5 mr-1" />
+                            Bereit
+                          </button>
+                        )}
+                        {order.status === "ready" && (
+                          <button
+                            onClick={() =>
+                              updateOrderStatus(order.id, "delivered")
+                            }
+                            className="p-2 rounded bg-royal-charcoal text-royal-cream hover:bg-royal-charcoal/80 flex items-center justify-center min-h-[44px]"
+                            style={{ fontSize: 16 }}
+                          >
+                            <Package className="w-5 h-5 mr-1" />
+                            Ausliefern
+                          </button>
+                        )}
+                        <button
+                          onClick={() => deleteOrder(order.id)}
+                          className="p-2 rounded bg-red-100 text-red-600 hover:bg-red-200 flex items-center justify-center min-h-[44px]"
+                          style={{ fontSize: 16 }}
+                          title="Bestellung löschen"
+                        >
+                          <Trash2 className="w-5 h-5 mr-1" />
+                          Löschen
+                        </button>
+                      </div>
+                    </td>
+                  </motion.tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        {orders.length === 0 && (
+        {visibleOrders.length === 0 && (
           <div className="text-center py-12">
             <Package className="w-16 h-16 mx-auto text-royal-cream/30 mb-4" />
             <p className="text-royal-cream/70">Keine Bestellungen gefunden</p>
@@ -869,10 +899,21 @@ const OrderManagement: React.FC = () => {
                       </div>
                       <div className="text-right">
                         <p className="font-semibold text-royal-charcoal">
-                          {item.quantity}x {item.price.toFixed(2)}€
+                          {item.quantity}x{" "}
+                          {Number.isFinite(Number(item.price))
+                            ? Number(item.price).toFixed(2)
+                            : "0.00"}
+                          €
                         </p>
                         <p className="font-bold text-royal-gold">
-                          {(item.price * item.quantity).toFixed(2)}€
+                          {(() => {
+                            const priceNum = Number(item.price);
+                            const total = Number.isFinite(priceNum)
+                              ? priceNum * item.quantity
+                              : 0;
+                            return total.toFixed(2);
+                          })()}
+                          €
                         </p>
                       </div>
                     </div>

@@ -15,79 +15,57 @@ import {
   Music,
   Gift,
 } from "lucide-react";
-import SocialBar from "../components/common/SocialBar";
+// SocialBar moved to app-level layout
 import CountUp from "../components/common/CountUp";
 import RoyalShishaLogo from "../assets/Logo.jpeg";
 import { HERO_VIDEOS, VIDEO_SETTINGS } from "../config/videos";
 import LocationMap from "../components/maps/LocationMap";
 
-const Home = () => {
+const Home: React.FC = () => {
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
-  const isAutoPlay = VIDEO_SETTINGS.autoPlay;
+  const isAutoPlay = VIDEO_SETTINGS?.autoPlay ?? false;
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
 
-  // Auto-advance videos
   useEffect(() => {
     if (!isAutoPlay) return;
-
     const interval = setInterval(() => {
       setCurrentVideoIndex((prev) => (prev + 1) % HERO_VIDEOS.length);
-    }, VIDEO_SETTINGS.autoAdvanceInterval);
-
+    }, VIDEO_SETTINGS.autoAdvanceInterval || 8000);
     return () => clearInterval(interval);
   }, [isAutoPlay]);
 
-  // Handle video play/pause
   const togglePlay = () => {
-    const currentVideo = videoRefs.current[currentVideoIndex];
-    if (currentVideo) {
-      if (isPlaying) {
-        currentVideo.pause();
-      } else {
-        currentVideo.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
+    const current = videoRefs.current[currentVideoIndex];
+    if (!current) return;
+    if (isPlaying) current.pause();
+    else current.play();
+    setIsPlaying(!isPlaying);
   };
 
-  // Navigate to specific video
   const goToVideo = (index: number) => {
     setCurrentVideoIndex(index);
     setIsPlaying(true);
-    const video = videoRefs.current[index];
-    if (video) {
-      video.currentTime = 0;
-      video.play();
+    const v = videoRefs.current[index];
+    if (v) {
+      v.currentTime = 0;
+      v.play();
     }
   };
 
-  // Previous video
-  const previousVideo = () => {
-    const newIndex =
-      currentVideoIndex === 0 ? HERO_VIDEOS.length - 1 : currentVideoIndex - 1;
-    goToVideo(newIndex);
-  };
+  const previousVideo = () =>
+    setCurrentVideoIndex((i) => (i === 0 ? HERO_VIDEOS.length - 1 : i - 1));
 
-  // Next video
-  const nextVideo = () => {
-    const newIndex = (currentVideoIndex + 1) % HERO_VIDEOS.length;
-    goToVideo(newIndex);
-  };
+  const nextVideo = () =>
+    setCurrentVideoIndex((i) => (i + 1) % HERO_VIDEOS.length);
 
-  // Handle video error and fallback to image
   const handleVideoError = (index: number) => {
-    if (!VIDEO_SETTINGS.fallbackOnError) return;
-
-    const videoElement = videoRefs.current[index];
-    if (videoElement) {
-      videoElement.style.display = "none";
-      // Show fallback image
-      const fallbackImg = videoElement.nextElementSibling as HTMLImageElement;
-      if (fallbackImg) {
-        fallbackImg.style.display = "block";
-      }
-    }
+    if (!VIDEO_SETTINGS?.fallbackOnError) return;
+    const el = videoRefs.current[index];
+    if (!el) return;
+    el.style.display = "none";
+    const next = el.nextElementSibling as HTMLImageElement | null;
+    if (next) next.style.display = "block";
   };
 
   const features = [
@@ -126,11 +104,10 @@ const Home = () => {
 
   return (
     <div className="min-h-screen">
-      <SocialBar />
+      {/* SocialBar is rendered globally in App.tsx */}
 
       {/* Hero Section with Video Carousel */}
       <section className="relative h-screen flex items-center justify-center overflow-hidden hero-section">
-        {/* Video Carousel */}
         <div className="absolute inset-0 z-0">
           <AnimatePresence mode="wait">
             <motion.div
@@ -154,247 +131,202 @@ const Home = () => {
                   src={HERO_VIDEOS[currentVideoIndex].url}
                   type="video/mp4"
                 />
-                Your browser does not support the video tag.
               </video>
 
-              {/* Fallback Image */}
               <img
                 src={HERO_VIDEOS[currentVideoIndex].fallback}
                 alt={HERO_VIDEOS[currentVideoIndex].title}
-                className="absolute top-1/2 left-1/2 w-auto min-w-full min-h-full max-w-none transform -translate-x-1/2 -translate-y-1/2 object-cover hidden" draggable={false}
+                className="absolute top-1/2 left-1/2 w-auto min-w-full min-h-full max-w-none transform -translate-x-1/2 -translate-y-1/2 object-cover hidden"
+                draggable={false}
               />
             </motion.div>
           </AnimatePresence>
         </div>
 
-        {/* Video Overlay with Enhanced Gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-black/60 via-black/40 to-royal-purple-dark/50 z-10"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-black/60 via-black/40 to-royal-purple-dark/50 z-10" />
 
-        {/* Video Controls - Responsive */}
-        <div className="absolute top-1/2 left-2 md:left-4 transform -translate-y-1/2 z-30">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={previousVideo}
-            className="bg-royal-gold/20 backdrop-blur-sm text-white p-2 md:p-3 rounded-full border border-royal-gold/30 hover:bg-royal-gold/30 transition-all duration-300 royal-glow"
-          >
-            <ChevronLeft className="w-4 h-4 md:w-6 md:h-6" />
-          </motion.button>
-        </div>
-
-        <div className="absolute top-1/2 right-2 md:right-4 transform -translate-y-1/2 z-30">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={nextVideo}
-            className="bg-royal-gold/20 backdrop-blur-sm text-white p-2 md:p-3 rounded-full border border-royal-gold/30 hover:bg-royal-gold/30 transition-all duration-300 royal-glow"
-          >
-            <ChevronRight className="w-4 h-4 md:w-6 md:h-6" />
-          </motion.button>
-        </div>
-
-        {/* Play/Pause Control - Mobile optimized */}
-        <div className="absolute top-20 md:top-24 right-2 md:right-4 z-30">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={togglePlay}
-            className="bg-royal-gold/20 backdrop-blur-sm text-white p-2 md:p-3 rounded-full border border-royal-gold/30 hover:bg-royal-gold/30 transition-all duration-300 royal-glow"
-          >
-            {isPlaying ? (
-              <Pause className="w-4 h-4 md:w-5 md:h-5" />
-            ) : (
-              <Play className="w-4 h-4 md:w-5 md:h-5" />
-            )}
-          </motion.button>
-        </div>
-
-        {/* Video Indicators - Smaller and positioned better on mobile */}
-        <div className="absolute bottom-16 md:bottom-20 left-1/2 transform -translate-x-1/2 z-30">
-          <div className="flex space-x-2 md:space-x-3">
-            {HERO_VIDEOS.map((_, index) => (
-              <motion.button
-                key={index}
-                whileHover={{ scale: 1.2 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={() => goToVideo(index)}
-                className={`w-2 h-2 md:w-3 md:h-3 rounded-full transition-all duration-300 ${
-                  index === currentVideoIndex
-                    ? "bg-royal-gold royal-glow"
-                    : "bg-white/50 hover:bg-white/70"
-                }`}
-              />
-            ))}
+        <div className="absolute inset-0 z-30">
+          <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={previousVideo}
+              className="bg-royal-gold/20 backdrop-blur-sm text-white p-2 md:p-3 rounded-full border border-royal-gold/30 hover:bg-royal-gold/30 transition-all duration-300 royal-glow"
+            >
+              <ChevronLeft className="w-4 h-4 md:w-6 md:h-6" />
+            </motion.button>
           </div>
-        </div>
 
-        {/* Video Info - Hidden on mobile to save space */}
-        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-30 text-center hidden md:block">
-          <motion.div
-            key={currentVideoIndex}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="text-white"
-          >
-            <h3 className="text-2xl font-royal font-bold mb-2 royal-text-glow">
-              {HERO_VIDEOS[currentVideoIndex].title}
-            </h3>
-            <p className="text-royal-cream-light">
-              {HERO_VIDEOS[currentVideoIndex].description}
-            </p>
-          </motion.div>
-        </div>
+          <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={nextVideo}
+              className="bg-royal-gold/20 backdrop-blur-sm text-white p-2 md:p-3 rounded-full border border-royal-gold/30 hover:bg-royal-gold/30 transition-all duration-300 royal-glow"
+            >
+              <ChevronRight className="w-4 h-4 md:w-6 md:h-6" />
+            </motion.button>
+          </div>
 
-        {/* Animated royal elements - Reduced on mobile */}
-        <div className="absolute inset-0 z-10 pointer-events-none hero-background-elements">
-          {/* Background decorative elements - reduced opacity and simplified animations */}
-          <motion.div
-            animate={{
-              scale: [1, 1.1, 1],
-              opacity: [0.1, 0.2, 0.1],
-            }}
-            transition={{
-              duration: 25,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-            className="absolute top-20 left-20 w-16 h-16 md:w-32 md:h-32 bg-royal-gold/10 rounded-full blur-2xl"
-          />
-          <motion.div
-            animate={{
-              scale: [1.1, 1, 1.1],
-              opacity: [0.1, 0.15, 0.1],
-            }}
-            transition={{
-              duration: 20,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-            className="absolute bottom-20 right-20 w-20 h-20 md:w-40 md:h-40 bg-royal-purple/10 rounded-full blur-2xl"
-          />
-          {/* Subtle floating elements - hidden on mobile */}
-          <motion.div
-            animate={{
-              y: [0, -15, 0],
-              opacity: [0.2, 0.4, 0.2],
-            }}
-            transition={{
-              duration: 6,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-            className="absolute top-1/4 left-1/6 w-12 h-12 bg-royal-gold/20 rounded-full blur-lg hidden md:block"
-          />
-          <motion.div
-            animate={{
-              y: [0, 10, 0],
-              opacity: [0.15, 0.3, 0.15],
-            }}
-            transition={{
-              duration: 8,
-              repeat: Infinity,
-              ease: "easeInOut",
-              delay: 3,
-            }}
-            className="absolute bottom-1/4 right-1/6 w-10 h-10 bg-royal-burgundy/15 rounded-full blur-md hidden md:block"
-          />
-        </div>
+          <div className="absolute top-20 md:top-24 right-4">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={togglePlay}
+              className="bg-royal-gold/20 backdrop-blur-sm text-white p-2 md:p-3 rounded-full border border-royal-gold/30 hover:bg-royal-gold/30 transition-all duration-300 royal-glow"
+            >
+              {isPlaying ? (
+                <Pause className="w-4 h-4 md:w-5 md:h-5" />
+              ) : (
+                <Play className="w-4 h-4 md:w-5 md:h-5" />
+              )}
+            </motion.button>
+          </div>
 
-        {/* Content - Optimized for mobile */}
-        <div className="relative z-30 text-center text-white px-4 max-w-4xl mx-auto w-full">
-          <motion.div
-            initial={{ opacity: 0, y: -30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 1,
-              delay: 0.2,
-            }}
-            className="mb-4 md:mb-8 hero-logo-container"
-          >
-            <div className="relative">
-              <img
-                draggable={false}
-                src={RoyalShishaLogo}
-                alt="Royal Shisha Logo"
-                className="w-20 h-20 sm:w-24 sm:h-24 md:w-40 md:h-40 mx-auto rounded-full object-cover border-2 md:border-4 border-royal-gold shadow-2xl relative z-10"
-              />
-              <div className="absolute inset-0 bg-royal-gold/20 rounded-full blur-xl animate-pulse"></div>
+          <div className="absolute bottom-16 md:bottom-20 left-1/2 transform -translate-x-1/2">
+            <div className="flex space-x-2 md:space-x-3">
+              {HERO_VIDEOS.map((_, index) => (
+                <motion.button
+                  key={index}
+                  whileHover={{ scale: 1.2 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => goToVideo(index)}
+                  className={`w-2 h-2 md:w-3 md:h-3 rounded-full transition-all duration-300 ${
+                    index === currentVideoIndex
+                      ? "bg-royal-gold royal-glow"
+                      : "bg-white/50 hover:bg-white/70"
+                  }`}
+                />
+              ))}
             </div>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 1,
-              delay: 0.4,
-            }}
-            className="mb-6 md:mb-8"
-          >
-            <h1 className="text-4xl sm:text-5xl md:text-7xl font-royal font-bold mb-4 md:mb-6 royal-text-glow">
-              Royal Shisha Bar
-            </h1>
-            <p className="text-lg sm:text-xl md:text-2xl text-royal-cream-light mb-6 md:mb-8 max-w-3xl mx-auto leading-relaxed">
-              Erleben Sie die Kunst des Shisha-Rauchens in einer königlichen
-              Atmosphäre mit Premium-Aromen und exklusivem Service
-            </p>
-          </motion.div>
+          <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 z-30 text-center hidden md:block">
+            <motion.div
+              key={currentVideoIndex}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="text-white"
+            >
+              <h3 className="text-2xl font-royal font-bold mb-2 royal-text-glow">
+                {HERO_VIDEOS[currentVideoIndex].title}
+              </h3>
+              <p className="text-royal-cream-light">
+                {HERO_VIDEOS[currentVideoIndex].description}
+              </p>
+            </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 1,
-              delay: 0.6,
-            }}
-            className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8 md:mb-12"
-          >
-            <Link
-              to="/menu"
-              className="px-8 py-4 bg-royal-gold text-royal-charcoal font-royal font-bold rounded-royal hover:bg-royal-gold/90 transition-all duration-300 royal-glow hover:scale-105 transform"
-            >
-              Menü Entdecken
-            </Link>
-            <Link
-              to="/events"
-              className="px-8 py-4 border-2 border-royal-gold text-royal-gold font-royal font-bold rounded-royal hover:bg-royal-gold hover:text-royal-charcoal transition-all duration-300 royal-glow hover:scale-105 transform"
-            >
-              Events & Reservierungen
-            </Link>
-            <Link
-              to="/loyalty"
-              className="px-8 py-4 bg-gradient-to-r from-purple-600 to-purple-800 text-white font-royal font-bold rounded-royal hover:from-purple-700 hover:to-purple-900 transition-all duration-300 royal-glow hover:scale-105 transform flex items-center space-x-2"
-            >
-              <Crown className="w-5 h-5" />
-              <span>Stempelpass</span>
-            </Link>
-          </motion.div>
+          <div className="absolute inset-0 z-10 pointer-events-none hero-background-elements">
+            <motion.div
+              animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.2, 0.1] }}
+              transition={{ duration: 25, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute top-20 left-20 w-16 h-16 md:w-32 md:h-32 bg-royal-gold/10 rounded-full blur-2xl"
+            />
+            <motion.div
+              animate={{ scale: [1.1, 1, 1.1], opacity: [0.1, 0.15, 0.1] }}
+              transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute bottom-20 right-20 w-20 h-20 md:w-40 md:h-40 bg-royal-purple/10 rounded-full blur-2xl"
+            />
+            <motion.div
+              animate={{ y: [0, -15, 0], opacity: [0.2, 0.4, 0.2] }}
+              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute top-1/4 left-1/6 w-12 h-12 bg-royal-gold/20 rounded-full blur-lg hidden md:block"
+            />
+            <motion.div
+              animate={{ y: [0, 10, 0], opacity: [0.15, 0.3, 0.15] }}
+              transition={{
+                duration: 8,
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: 3,
+              }}
+              className="absolute bottom-1/4 right-1/6 w-10 h-10 bg-royal-burgundy/15 rounded-full blur-md hidden md:block"
+            />
+          </div>
 
-          {/* Stats Section - Responsive */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 1,
-              delay: 0.8,
-            }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 max-w-4xl mx-auto"
-          >
-            {stats.map((stat, index) => (
-              <div
-                key={index}
-                className="text-center p-4 bg-royal-gold/10 backdrop-blur-sm rounded-royal border border-royal-gold/20"
-              >
-                <div className="text-2xl md:text-3xl font-royal font-bold text-royal-gold mb-1">
-                  <CountUp end={stat.number} suffix={stat.suffix} />
-                </div>
-                <div className="text-xs md:text-sm text-royal-cream-light">
-                  {stat.label}
-                </div>
+          <div className="relative z-30 text-center text-white px-4 max-w-4xl mx-auto w-full">
+            <motion.div
+              initial={{ opacity: 0, y: -30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1, delay: 0.2 }}
+              className="mb-4 md:mb-8 hero-logo-container"
+            >
+              <div className="relative">
+                <img
+                  draggable={false}
+                  src={RoyalShishaLogo}
+                  alt="Royal Shisha Logo"
+                  className="w-20 h-20 sm:w-24 sm:h-24 md:w-40 md:h-40 mx-auto rounded-full object-cover border-2 md:border-4 border-royal-gold shadow-2xl relative z-10"
+                />
+                <div className="absolute inset-0 bg-royal-gold/20 rounded-full blur-xl animate-pulse" />
               </div>
-            ))}
-          </motion.div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1, delay: 0.4 }}
+              className="mb-6 md:mb-8"
+            >
+              <h1 className="text-4xl sm:text-5xl md:text-7xl font-royal font-bold mb-4 md:mb-6 royal-text-glow">
+                Royal Shisha Bar
+              </h1>
+              <p className="text-lg sm:text-xl md:text-2xl text-royal-cream-light mb-6 md:mb-8 max-w-3xl mx-auto leading-relaxed">
+                Erleben Sie die Kunst des Shisha-Rauchens in einer königlichen
+                Atmosphäre mit Premium-Aromen und exklusivem Service
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1, delay: 0.6 }}
+              className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8 md:mb-12"
+            >
+              <Link
+                to="/menu"
+                className="px-8 py-4 bg-royal-gold text-royal-charcoal font-royal font-bold rounded-royal hover:bg-royal-gold/90 transition-all duration-300 royal-glow hover:scale-105 transform"
+              >
+                Menü Entdecken
+              </Link>
+              <Link
+                to="/events"
+                className="px-8 py-4 border-2 border-royal-gold text-royal-gold font-royal font-bold rounded-royal hover:bg-royal-gold hover:text-royal-charcoal transition-all duration-300 royal-glow hover:scale-105 transform"
+              >
+                Events & Reservierungen
+              </Link>
+              <Link
+                to="/loyalty"
+                className="px-8 py-4 bg-gradient-to-r from-purple-600 to-purple-800 text-white font-royal font-bold rounded-royal hover:from-purple-700 hover:to-purple-900 transition-all duration-300 royal-glow hover:scale-105 transform flex items-center space-x-2"
+              >
+                <Crown className="w-5 h-5" />
+                <span>Stempelpass</span>
+              </Link>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1, delay: 0.8 }}
+              className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 max-w-4xl mx-auto"
+            >
+              {stats.map((stat, index) => (
+                <div
+                  key={index}
+                  className="text-center p-4 bg-royal-gold/10 backdrop-blur-sm rounded-royal border border-royal-gold/20"
+                >
+                  <div className="text-2xl md:text-3xl font-royal font-bold text-royal-gold mb-1">
+                    <CountUp end={stat.number} suffix={stat.suffix} />
+                  </div>
+                  <div className="text-xs md:text-sm text-royal-cream-light">
+                    {stat.label}
+                  </div>
+                </div>
+              ))}
+            </motion.div>
+          </div>
         </div>
       </section>
 
@@ -557,7 +489,6 @@ const Home = () => {
             </p>
           </motion.div>
 
-          {/* Google Maps Integration */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
