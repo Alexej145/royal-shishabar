@@ -1,36 +1,53 @@
-import React, { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   MapPin,
   Crown,
   Star,
   RefreshCw,
   Info,
-  HelpCircle,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
 } from "lucide-react";
 import { ReservationService } from "../../services/reservationService";
 import { OrderService } from "../../services/orderService";
-import { Table } from "../../types/reservation";
-import { Order } from "../../types/order";
+import { Table, Reservation } from "../../types/reservation";
+import { Order, PaymentStatus } from "../../types/order";
 import { ErrorEmptyState, NoDataEmptyState } from "../common/EmptyState";
 import { toast } from "react-hot-toast";
 
-interface SimpleLiveTableGridProps {
-  onTableClick?: (table: Table) => void;
+// Enum for table status types to improve type safety
+enum TableStatusType {
+  AVAILABLE = "available",
+  SEATED = "seated",
+  ACTIVE_ORDER = "active_order",
+  OPEN_BILL = "open_bill",
 }
 
-interface SimpleTableStatus {
+// Enum for table locations to improve type safety
+enum TableLocation {
+  VIP = "vip",
+  OUTDOOR = "outdoor",
+  INDOOR = "indoor",
+}
+
+// Type definitions for component props and state
+interface SimpleLiveTableGridProps {
+  onTableClick?: (table: Table) => void;
+  refreshInterval?: number; // Optional auto-refresh interval in ms
+}
+
+interface TableStatus {
   table: Table;
   hasActiveOrder: boolean;
   orderAmount?: number;
-  isOpenBill?: boolean;
-  isSeated?: boolean;
-  statusType: "available" | "seated" | "active_order" | "open_bill";
+  isOpenBill: boolean;
+  isSeated: boolean;
+  statusType: TableStatusType;
 }
 
-interface SimpleStats {
+interface GridStats {
   totalTables: number;
   available: number;
   occupied: number;
@@ -38,318 +55,493 @@ interface SimpleStats {
   totalRevenue: number;
 }
 
+interface GridState {
+  loading: boolean;
+  error: string | null;
+  tables: Table[];
+  ordersToday: Order[];
+  seatedReservations: Reservation[];
+  stats: GridStats;
+  tableStatuses: TableStatus[];
+  lastUpdated: Date | null;
+}
+
+// Constants for styling and configuration
+const STATUS_STYLES = {
+  [TableStatusType.OPEN_BILL]: {
+    border: "border-red-300",
+    badge: "bg-red-100 text-red-700",
+    emoji: "??", // open bill
+  },
+  [TableStatusType.ACTIVE_ORDER]: {
+    border: "border-amber-300",
+    badge: "bg-amber-100 text-amber-700",
+    emoji: "???", // active order
+  },
+  [TableStatusType.SEATED]: {
+    border: "border-purple-300",
+    badge: "bg-purple-100 text-purple-700",
+    emoji: "??", // seated
+  },
+  [TableStatusType.AVAILABLE]: {
+    border: "border-emerald-200",
+    badge: "bg-emerald-100 text-emerald-700",
+    emoji: "?", // available
+  },
+};
+
+// Utility functions
+const formatEuro = (amount: number): string =>
+  amount.toLocaleString("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  });
+
+const formatTime = (date: Date): string =>
+  date.toLocaleTimeString("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+// Memoized component for displaying a single table card
+const TableCard: React.FC<{
+  tableStatus: TableStatus;
+  onClick: () => void;
+  getLocationIcon: (location: string) => React.ReactNode;
+}> = React.memo(({ tableStatus: ts, onClick, getLocationIcon }) => {
+  const styles = STATUS_STYLES[ts.statusType];
+
+  return (
+    <motion.div
+      layout
+      onClick={onClick}
+      className={`p-4 rounded-lg cursor-pointer border ${styles.border} hover:shadow-md transition-shadow`}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+    >
+      <div className="flex justify-between items-start mb-2">
+        <div
+          className={`text-sm font-semibold px-2 py-1 rounded-full ${styles.badge}`}
+        >
+          {ts.table.capacity}P
+        </div>
+        <div className="p-1 rounded bg-blue-100">
+          {getLocationIcon(ts.table.location)}
+        </div>
+      </div>
+
+      <div className="text-center text-2xl font-bold mb-2 text-black">
+        {ts.table.number}
+      </div>
+
+      <div className="text-center mb-2 text-3xl">{styles.emoji}</div>
+
+      {typeof ts.orderAmount === "number" && ts.orderAmount > 0 && (
+        <div className="text-center text-sm mt-2 font-semibold text-black">
+          {formatEuro(ts.orderAmount)}
+        </div>
+      )}
+    </motion.div>
+  );
+});
+
+// Memoized component for displaying stats cards
+const StatsCard: React.FC<{
+  title: string;
+  value: number | string;
+  subtitle: string;
+  bgClass: string;
+  borderClass: string;
+  textClass: string;
+  valueClass: string;
+}> = React.memo(({
+  title,
+  value,
+  subtitle,
+  bgClass,
+  borderClass,
+  textClass,
+  valueClass,
+}) => (
+  <div className={`p-4 rounded-2xl ${bgClass} ${borderClass}`}>
+    <p className={`${textClass} text-sm font-semibold uppercase`}>{title}</p>
+    <p className={`text-3xl font-bold ${valueClass}`}>{value}</p>
+    <p className={`text-xs ${textClass}`}>{subtitle}</p>
+  </div>
+));
+
+// Main component with optimized data handling
 const SimpleLiveTableGrid: React.FC<SimpleLiveTableGridProps> = ({
   onTableClick,
+  refreshInterval = 0, // Default to no auto-refresh
 }) => {
-  const [showLegend, setShowLegend] = useState(false);
-  const [tables, setTables] = useState<Table[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Consolidated state using a single state object
+  const [state, setState] = useState<GridState>({
+    loading: true,
+    error: null,
+    tables: [],
+    ordersToday: [],
+    seatedReservations: [],
+    stats: {
+      totalTables: 0,
+      available: 0,
+      occupied: 0,
+      openBills: 0,
+      totalRevenue: 0,
+    },
+    tableStatuses: [],
+    lastUpdated: null,
+  });
+  
+  const [expanded, setExpanded] = useState(true);
 
-  const calculateTableStatuses = (): SimpleTableStatus[] => {
-    return tables.map((table) => {
-      const tableOrders = orders.filter((order) => {
-        if (order.tableNumber !== table.number) return false;
-        // delivered+paid => free; orders with status 'ready' are not included in active statuses (so they free the table)
-        if (order.status === "delivered" && order.payment?.status === "paid")
-          return false;
-        // include active statuses and delivered if unpaid/partial
-        return (
-          ["pending", "confirmed", "preparing"].includes(order.status) ||
-          order.status === "delivered"
-        );
-      });
+  // Memoized date range calculation
+  const dateRange = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    
+    return { start, end };
+  }, []);
 
-      const activeOrder = tableOrders.sort(
-        (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-      )[0];
-      const isOpenBill =
-        activeOrder?.status === "delivered" &&
-        (activeOrder.payment?.status === "unpaid" ||
-          activeOrder.payment?.status === "partial");
-      const hasActiveOrder = !!activeOrder && !isOpenBill;
+  // Error handling with detailed error information
+  const handleError = useCallback((e: unknown): string => {
+    console.error("Error loading live grid data:", e);
+    
+    if (e instanceof Error) return e.message;
+    if (typeof e === "string") return e;
+    if (e && typeof e === "object" && "message" in e && typeof e.message === "string") {
+      return e.message;
+    }
+    return "Fehler beim Laden der Daten";
+  }, []);
 
-      const recentPaid = orders.filter(
-        (o) =>
-          o.tableNumber === table.number &&
-          o.status === "delivered" &&
-          o.payment?.status === "paid" &&
-          Date.now() - o.createdAt.getTime() < 2 * 60 * 60 * 1000
+  // Optimized data loading function
+  const loadData = useCallback(async () => {
+    setState(prev => ({ ...prev, loading: true, error: null }));
+    
+    try {
+      // Parallel data fetching with Promise.all
+      const [tables, orders, seated] = await Promise.all([
+        ReservationService.getTables(),
+        OrderService.getOrdersWithFilters({
+          dateRange: { start: dateRange.start, end: dateRange.end },
+        }),
+        ReservationService.getReservations({
+          date: new Date(),
+          status: "seated",
+        }),
+      ]);
+
+      // Process data and update state in a single operation
+      const processedData = processTableData(tables, orders, seated);
+      
+      setState(prev => ({
+        ...prev,
+        loading: false,
+        tables,
+        ordersToday: orders,
+        seatedReservations: seated,
+        tableStatuses: processedData.tableStatuses,
+        stats: processedData.stats,
+        lastUpdated: new Date(),
+      }));
+    } catch (e: unknown) {
+      setState(prev => ({
+        ...prev, 
+        loading: false, 
+        error: handleError(e)
+      }));
+    }
+  }, [dateRange, handleError]);
+
+  // Process table data with optimized algorithms
+  const processTableData = useCallback((
+    tables: Table[], 
+    orders: Order[], 
+    reservations: Reservation[]
+  ) => {
+    // Create efficient lookup maps for O(1) access
+    const seatedMap = new Map<number, boolean>();
+    for (const r of reservations) {
+      seatedMap.set(r.tableNumber, true);
+    }
+
+    // Group orders by table for efficient processing
+    const ordersMap = new Map<number, Order[]>();
+    for (const o of orders) {
+      const tableOrders = ordersMap.get(o.tableNumber) || [];
+      tableOrders.push(o);
+      ordersMap.set(o.tableNumber, tableOrders);
+    }
+
+    // Process table statuses with a single pass
+    const tableStatuses = tables.map((table) => {
+      const tableOrders = ordersMap.get(table.number) || [];
+      
+      // Determine table status with optimized checks
+      const hasActiveOrder = tableOrders.some(
+        (o) => o.status !== "cancelled" && o.status !== "delivered"
       );
-      const isSeated = !hasActiveOrder && !isOpenBill && recentPaid.length > 0;
-
-      const statusType: SimpleTableStatus["statusType"] = isOpenBill
-        ? "open_bill"
-        : hasActiveOrder
-        ? "active_order"
-        : isSeated
-        ? "seated"
-        : "available";
+      
+      const isOpenBill = tableOrders.some(
+        (o) => o.payment?.status !== "paid"
+      );
+      
+      // Calculate unpaid amount in a single pass
+      const unpaidAmount = tableOrders
+        .filter((o) => o.payment?.status !== "paid")
+        .reduce((sum, o) => sum + (o.payment?.amount ?? o.totalAmount ?? 0), 0);
+      
+      const isSeated = Boolean(seatedMap.get(table.number));
+      
+      // Determine status type with priority logic
+      let statusType = TableStatusType.AVAILABLE;
+      if (isOpenBill) statusType = TableStatusType.OPEN_BILL;
+      else if (hasActiveOrder) statusType = TableStatusType.ACTIVE_ORDER;
+      else if (isSeated) statusType = TableStatusType.SEATED;
+      
       return {
         table,
         hasActiveOrder,
-        orderAmount: activeOrder?.totalAmount,
         isOpenBill,
         isSeated,
         statusType,
-      };
+        orderAmount: unpaidAmount > 0 ? unpaidAmount : undefined,
+      } as TableStatus;
     });
-  };
-
-  const calculateStats = (statuses: SimpleTableStatus[]): SimpleStats => ({
-    totalTables: statuses.length,
-    occupied: statuses.filter((s) => s.hasActiveOrder || s.isSeated).length,
-    available:
-      statuses.length -
-      statuses.filter((s) => s.hasActiveOrder || s.isSeated).length,
-    openBills: statuses.filter((s) => s.isOpenBill).length,
-    totalRevenue: statuses.reduce((sum, s) => sum + (s.orderAmount || 0), 0),
-  });
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [tablesData, ordersData] = await Promise.all([
-        ReservationService.getTables(),
-        OrderService.getOrders(),
-      ]);
-      setTables(tablesData || []);
-      setOrders(ordersData || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      toast.error("Fehler beim Laden der Daten");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-    const unsub = OrderService.onOrdersChange((ordersData) =>
-      setOrders(ordersData)
-    );
-    return () => unsub && unsub();
+    
+    // Calculate stats in a single pass
+    const totalTables = tables.length;
+    const available = tableStatuses.filter(
+      (t) => t.statusType === TableStatusType.AVAILABLE
+    ).length;
+    const occupied = totalTables - available;
+    const openBills = tableStatuses.filter(
+      (t) => t.statusType === TableStatusType.OPEN_BILL
+    ).length;
+    
+    // Calculate total revenue with a single reduce operation
+    const totalRevenue = orders
+      .filter((o) => o.payment?.status === "paid")
+      .reduce((sum, o) => sum + (o.payment?.amount ?? o.totalAmount ?? 0), 0);
+    
+    return {
+      tableStatuses,
+      stats: {
+        totalTables,
+        available,
+        occupied,
+        openBills,
+        totalRevenue,
+      },
+    };
   }, []);
 
-  const getLocationIcon = (location: string) => {
+  // Get location icon with memoization
+  const getLocationIcon = useCallback((location: string) => {
     switch (location) {
-      case "vip":
-        return <Crown className="w-4 h-4 text-blue-500" />;
-      case "outdoor":
-        return <Star className="w-4 h-4 text-green-500" />;
+      case TableLocation.VIP:
+        return <Crown className="w-4 h-4 text-yellow-600" />;
+      case TableLocation.OUTDOOR:
+        return <Star className="w-4 h-4 text-green-600" />;
       default:
-        return <MapPin className="w-4 h-4 text-blue-500" />;
+        return <MapPin className="w-4 h-4 text-blue-600" />; // indoor/default
     }
-  };
+  }, []);
 
-  if (loading)
+  // Handle refresh with optimistic UI update
+  const handleRefresh = useCallback(async () => {
+    toast.promise(
+      loadData(),
+      {
+        loading: "Aktualisiere...",
+        success: "Daten aktualisiert",
+        error: (err) => `Fehler: ${err.toString()}`
+      }
+    );
+  }, [loadData]);
+
+  // Toggle expanded state
+  const toggleExpanded = useCallback(() => {
+    setExpanded(prev => !prev);
+  }, []);
+
+  // Initial data loading
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Optional auto-refresh functionality
+  useEffect(() => {
+    if (refreshInterval > 0) {
+      const intervalId = setInterval(() => {
+        loadData();
+      }, refreshInterval);
+      
+      return () => clearInterval(intervalId);
+    }
+  }, [refreshInterval, loadData]);
+
+  // Render loading state
+  if (state.loading) {
     return (
-      <div className="p-6">
-        <div className="flex items-center justify-center space-x-2 mb-6">
-          <RefreshCw className="w-5 h-5 animate-spin" />
-          <span>Laden der Tische...</span>
+      <div className="p-4">
+        <div className="animate-pulse flex items-center space-x-2 text-sm text-gray-500">
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          <span>Lade Tische...</span>
         </div>
       </div>
     );
-  if (error)
+  }
+
+  // Render error state
+  if (state.error) {
     return (
-      <div className="p-6">
-        <ErrorEmptyState
-          title="Fehler beim Laden der Tische"
-          description={error}
-          onRetry={loadData}
-          retrying={loading}
+      <div className="p-4">
+        <ErrorEmptyState 
+          title="Fehler" 
+          description={state.error} 
+          icon={<AlertTriangle className="w-8 h-8 text-red-500" />}
         />
-      </div>
-    );
-  if (tables.length === 0)
-    return (
-      <div className="p-6">
-        <NoDataEmptyState
-          title="Keine Tische verfügbar"
-          description="Es sind derzeit keine Tische konfiguriert."
-          onRefresh={loadData}
-          refreshing={loading}
-        />
-      </div>
-    );
-
-  const tableStatuses = calculateTableStatuses();
-  const stats = calculateStats(tableStatuses);
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-r from-royal-charcoal to-royal-charcoal-dark rounded-xl p-6 border border-blue-200/20 shadow-xl">
-        <div className="flex justify-between items-start">
-          <div>
-            <h2 className="text-3xl font-bold text-blue-600 mb-2 flex items-center">
-              <div className="w-3 h-3 bg-blue-600 rounded-full mr-3 animate-pulse" />
-              Tischübersicht{" "}
-              <span className="ml-3 text-xl text-blue-200/80">
-                ({tableStatuses.length} Tische)
-              </span>
-            </h2>
-            <p className="text-blue-200/80 text-lg">
-              Live Übersicht von Tischen und aktuellen Bestellungen
-            </p>
-          </div>
-
-          <div className="flex space-x-3">
-            <button
-              onClick={() => setShowLegend(!showLegend)}
-              className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-blue-700 text-blue-200 px-4 py-2 rounded-xl"
-            >
-              <HelpCircle className="w-5 h-5" />
-              <span className="font-medium">Legende</span>
-              {showLegend ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-xl disabled:opacity-60"
-            >
-              <RefreshCw
-                className={`w-5 h-5 ${loading ? "animate-spin" : ""}`}
-              />
-              <span>Aktualisieren</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
-          <p className="text-emerald-600 text-sm font-semibold uppercase">
-            Verfügbar
-          </p>
-          <p className="text-3xl font-bold text-green-600">{stats.available}</p>
-          <p className="text-xs text-emerald-600">Tische frei</p>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
-          <p className="text-amber-600 text-sm font-semibold uppercase">
-            Besetzt
-          </p>
-          <p className="text-3xl font-bold text-orange-600">{stats.occupied}</p>
-          <p className="text-xs text-amber-600">Aktive Tische</p>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200">
-          <p className="text-blue-600 text-sm font-semibold uppercase">
-            Umsatz
-          </p>
-          <p className="text-3xl font-bold text-blue-600">
-            €{stats.totalRevenue.toFixed(0)}
-          </p>
-          <p className="text-xs text-blue-400">Aktueller Umsatz</p>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-red-50 border border-red-200">
-          <p className="text-red-600 text-sm font-semibold uppercase">
-            Offene Rechnungen
-          </p>
-          <p className="text-3xl font-bold text-red-600">{stats.openBills}</p>
-          <p className="text-xs text-red-600">Bereit zum Kassieren</p>
-        </div>
-      </div>
-
-      {showLegend && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="p-6 bg-slate-50 rounded-xl border"
+        <button
+          onClick={handleRefresh}
+          className="mt-4 px-4 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors"
         >
-          <div className="flex items-center mb-4">
-            <div className="bg-blue-100 p-2 rounded-full mr-3">
-              <Info className="w-5 h-5 text-blue-600" />
-            </div>
-            <h3 className="text-lg font-bold text-blue-600">Tischstatus Legende</h3>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-3 bg-white rounded-lg border text-green-700">
-              Verfügbar — Bereit für neue Gäste
-            </div>
-            <div className="p-3 bg-white rounded-lg border text-orange-700">
-              Besetzt — Kürzlich bezahlt / noch nicht frei
-            </div>
-            <div className="p-3 bg-white rounded-lg border text-blue-700">
-              Aktive Bestellung — Bestellung in Bearbeitung
-            </div>
-            <div className="p-3 bg-white rounded-lg border text-black">
-              Offene Rechnung — Zahlung offen
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      <div className="bg-white p-4 rounded-xl border">
-        <div className="grid grid-cols-5 gap-4">
-          {tableStatuses
-            .sort((a, b) => a.table.number - b.table.number)
-            .map((ts) => (
-              <motion.div
-                key={ts.table.id}
-                layout
-                onClick={() => onTableClick?.(ts.table)}
-                className={`p-4 rounded-lg cursor-pointer border ${
-                  ts.statusType === "open_bill"
-                    ? "border-red-300"
-                    : ts.statusType === "active_order"
-                    ? "border-amber-300"
-                    : ts.statusType === "seated"
-                    ? "border-purple-300"
-                    : "border-emerald-200"
-                }`}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <div
-                    className={`text-sm font-semibold px-2 py-1 rounded-full ${
-                      ts.statusType === "open_bill"
-                        ? "bg-red-100 text-red-700"
-                        : ts.statusType === "active_order"
-                        ? "bg-amber-100 text-amber-700"
-                        : ts.statusType === "seated"
-                        ? "bg-purple-100 text-purple-700"
-                        : "bg-emerald-100 text-emerald-700"
-                    }`}
-                  >
-                    {ts.table.capacity}P
-                  </div>
-                  <div className="p-1 rounded bg-blue-100">
-                    {getLocationIcon(ts.table.location)}
-                  </div>
-                </div>
-
-                <div className="text-center text-2xl font-bold mb-2 text-black">
-                  {ts.table.number}
-                </div>
-
-                <div className="text-center mb-2 text-3xl">
-                  {ts.statusType === "open_bill"
-                    ? "💳"
-                    : ts.statusType === "active_order"
-                    ? "🍽️"
-                    : ts.statusType === "seated"
-                    ? "🪑"
-                    : "✅"}
-                </div>
-
-                {ts.orderAmount && (
-                  <div className="text-center text-sm mt-2 font-semibold text-black">
-                    €{ts.orderAmount.toFixed(0)}
-                  </div>
-                )}
-              </motion.div>
-            ))}
-        </div>
+          Erneut versuchen
+        </button>
       </div>
+    );
+  }
+
+  // Render empty state
+  if (!state.tables.length) {
+    return (
+      <div className="p-4">
+        <NoDataEmptyState
+          title="Keine Tische"
+          description="Es wurden keine Tische gefunden."
+        />
+      </div>
+    );
+  }
+
+  // Main render with optimized component structure
+  return (
+    <div className="space-y-4">
+      {/* Header with actions */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">Live Tische</h2>
+          <button
+            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 transition-colors"
+            onClick={handleRefresh}
+            title="Aktualisieren"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+          {state.lastUpdated && (
+            <span className="text-xs text-gray-500">
+              Aktualisiert: {formatTime(state.lastUpdated)}
+            </span>
+          )}
+        </div>
+
+        <button
+          className="text-xs text-gray-600 hover:text-gray-800 inline-flex items-center gap-1"
+          onClick={toggleExpanded}
+        >
+          {expanded ? (
+            <>
+              <ChevronUp className="w-4 h-4" />
+              Einklappen
+            </>
+          ) : (
+            <>
+              <ChevronDown className="w-4 h-4" />
+              Ausklappen
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Stats with animation */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            layout
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-3"
+          >
+            <StatsCard
+              title="Tische"
+              value={state.stats.totalTables}
+              subtitle="Gesamt"
+              bgClass="bg-white"
+              borderClass="border border-gray-200"
+              textClass="text-gray-500"
+              valueClass="text-black"
+            />
+            <StatsCard
+              title="Frei"
+              value={state.stats.available}
+              subtitle="Verf�gbar"
+              bgClass="bg-emerald-50"
+              borderClass="border border-emerald-200"
+              textClass="text-emerald-700"
+              valueClass="text-emerald-900"
+            />
+            <StatsCard
+              title="Belegt"
+              value={state.stats.occupied}
+              subtitle="Seated/Bestellung/Rechnung"
+              bgClass="bg-purple-50"
+              borderClass="border border-purple-200"
+              textClass="text-purple-700"
+              valueClass="text-purple-900"
+            />
+            <StatsCard
+              title="Offen"
+              value={state.stats.openBills}
+              subtitle="Offene Rechnungen"
+              bgClass="bg-red-50"
+              borderClass="border border-red-200"
+              textClass="text-red-700"
+              valueClass="text-red-900"
+            />
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-500 flex items-center gap-2">
+                <Info className="w-4 h-4" />
+                Heutiger Umsatz (bezahlt):{" "}
+                <span className="font-semibold text-black">
+                  {formatEuro(state.stats.totalRevenue)}
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Table grid with optimized rendering */}
+      <motion.div
+        layout
+        className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3"
+      >
+        {state.tableStatuses.map((ts) => (
+          <TableCard
+            key={ts.table.id}
+            tableStatus={ts}
+            onClick={() => onTableClick?.(ts.table)}
+            getLocationIcon={getLocationIcon}
+          />
+        ))}
+      </motion.div>
     </div>
   );
 };

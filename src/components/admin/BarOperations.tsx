@@ -1,4 +1,10 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  useMemo,
+} from "react";
 import {
   collection,
   query,
@@ -6,6 +12,7 @@ import {
   orderBy,
   onSnapshot,
   getDocs,
+  Firestore,
 } from "firebase/firestore";
 import { getFirestoreDB } from "../../config/firebase";
 import { Order } from "../../types/order";
@@ -30,6 +37,20 @@ import {
 } from "lucide-react";
 import { safeToDateWithFallback } from "../../utils/dateUtils";
 
+// Constants for category matching to avoid string repetition and typos
+const CATEGORIES = {
+  DRINKS: new Set(["drinks", "beverages"]),
+  SHISHA: new Set(["shisha", "hookah", "tobacco"]),
+};
+
+// Type for the setupRealtimeListener function compatible with useRealtimeAdminData
+// T is the processed data type returned by the processor
+// K is the raw data type emitted by the listener
+export type SetupRealtimeListenerFn<T> = <K>(
+  setupFn: (callback: (data: K) => void) => () => void,
+  processFn?: (data: K) => T
+) => () => void;
+
 interface OrderWithItem extends Order {
   currentItem: CartItem & MenuItem;
 }
@@ -39,8 +60,14 @@ interface BarOperationsData {
   pendingOrders: Order[];
 }
 
-interface BarOperationsProps {}
+type BarOperationsProps = Record<string, never>;
 
+/**
+ * BarOperations Component
+ *
+ * Displays and manages drink and shisha orders for bar staff.
+ * Features real-time updates, order categorization, and status management.
+ */
 const BarOperations: React.FC<BarOperationsProps> = () => {
   const [drinkOrders, setDrinkOrders] = useState<OrderWithItem[]>([]);
   const [shishaOrders, setShishaOrders] = useState<OrderWithItem[]>([]);
@@ -48,24 +75,29 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
     new Set()
   );
 
-  // CRITICAL FIX: Add refs to prevent aggressive reloading
+  // Refs to prevent aggressive reloading and maintain state between renders
   const isProcessingRef = useRef(false);
   const lastProcessedOrdersRef = useRef<string>("");
   const menuItemsRef = useRef<MenuItem[]>([]);
-  const hasLoadedInitialDataRef = useRef(false); // CRITICAL FIX: Track if initial data was loaded
-  const setupRealtimeListenerRef = useRef<any>(null); // CRITICAL FIX: Store stable reference to setupRealtimeListener
+  const hasLoadedInitialDataRef = useRef(false);
+  const setupRealtimeListenerRef = useRef<SetupRealtimeListenerFn<
+    Order[]
+  > | null>(null);
 
   const db = getFirestoreDB();
 
-  // CRITICAL FIX: Memoize the processOrdersWithMenuItems function with proper dependencies
+  /**
+   * Process orders with menu items to categorize them into drinks and shisha
+   * Uses memoization and hash comparison to prevent unnecessary processing
+   */
   const processOrdersWithMenuItems = useCallback(
     (orders: Order[], menuItems: MenuItem[]) => {
-      // CRITICAL FIX: Prevent duplicate processing
+      // Prevent duplicate processing
       if (isProcessingRef.current) {
         return;
       }
 
-      // CRITICAL FIX: Check if orders have actually changed
+      // Create a hash of orders to check if they've changed
       const ordersHash = JSON.stringify(
         orders.map((o) => ({
           id: o.id,
@@ -73,6 +105,8 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
           updatedAt: o.updatedAt,
         }))
       );
+
+      // Skip processing if orders haven't changed
       if (ordersHash === lastProcessedOrdersRef.current) {
         return;
       }
@@ -80,14 +114,16 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
       isProcessingRef.current = true;
       lastProcessedOrdersRef.current = ordersHash;
 
+      // Create a Map for O(1) menu item lookups instead of using find() in a loop
+      const menuItemsMap = new Map(menuItems.map((item) => [item.id, item]));
+
       const drinks: OrderWithItem[] = [];
       const shisha: OrderWithItem[] = [];
 
+      // Process each order and categorize items
       orders.forEach((order) => {
         order.items.forEach((orderItem) => {
-          const menuItem = menuItems.find(
-            (item) => item.id === orderItem.menuItemId
-          );
+          const menuItem = menuItemsMap.get(orderItem.menuItemId);
 
           if (menuItem) {
             const orderWithMenuItem: OrderWithItem = {
@@ -98,21 +134,15 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
               },
             };
 
-            if (
-              menuItem.category === "drinks" ||
-              menuItem.category === "beverages"
-            ) {
+            // Use the CATEGORIES constant for more reliable category matching
+            if (CATEGORIES.DRINKS.has(menuItem.category)) {
               drinks.push(orderWithMenuItem);
-            } else if (
-              menuItem.category === "shisha" ||
-              menuItem.category === "hookah" ||
-              menuItem.category === "tobacco"
-            ) {
+            } else if (CATEGORIES.SHISHA.has(menuItem.category)) {
               shisha.push(orderWithMenuItem);
             }
           } else {
             console.warn(
-              "⚠️ Menu item not found for orderItem:",
+              "?? Menu item not found for orderItem:",
               orderItem.menuItemId
             );
           }
@@ -122,7 +152,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
       setDrinkOrders(drinks);
       setShishaOrders(shisha);
 
-      // CRITICAL FIX: Reset processing flag after a short delay
+      // Reset processing flag after a short delay
       setTimeout(() => {
         isProcessingRef.current = false;
       }, 100);
@@ -141,19 +171,19 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
   } = useMultipleAdminDataLoader<BarOperationsData>({
     initialData: { menuItems: [], pendingOrders: [] },
     onSuccess: (data) => {
-      // CRITICAL FIX: Store menu items in ref for real-time updates
+      // Store menu items in ref for real-time updates
       menuItemsRef.current = data.menuItems;
       processOrdersWithMenuItems(data.pendingOrders, data.menuItems);
     },
     onError: (error) => {
-      console.error("❌ BarOperations: Initial data loading failed:", error);
+      console.error("? BarOperations: Initial data loading failed:", error);
       toast.error("Fehler beim Laden der Daten");
     },
     checkEmpty: (data) =>
       data.menuItems.length === 0 && data.pendingOrders.length === 0,
   });
 
-  // CRITICAL FIX: Use realtime data loader with proper cleanup
+  // Use realtime data loader with proper cleanup
   const {
     loading: loadingRealtime,
     error: realtimeError,
@@ -162,12 +192,12 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
     Array.isArray(data) ? data.length === 0 : !data
   );
 
-  // CRITICAL FIX: Store stable reference to setupRealtimeListener
+  // Store stable reference to setupRealtimeListener
   setupRealtimeListenerRef.current = setupRealtimeListener;
 
-  // CRITICAL FIX: Load initial data only once when component mounts
+  // Load initial data only once when component mounts
   useEffect(() => {
-    // CRITICAL FIX: Prevent multiple initial data loads
+    // Prevent multiple initial data loads
     if (hasLoadedInitialDataRef.current) {
       return;
     }
@@ -211,23 +241,30 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
         return orders;
       },
     });
-  }, []); // CRITICAL FIX: Empty dependency array - only run once on mount
+  }, [db, loadInitialData]); // Include dependencies; guarded by hasLoadedInitialDataRef to run once
 
-  // CRITICAL FIX: Set up realtime listener with debouncing and proper cleanup
+  // Create a memoized query for orders to avoid recreating it on each render
+  const createOrdersQuery = useCallback((db: Firestore) => {
+    return query(
+      collection(db, "orders"),
+      where("status", "in", ["pending", "confirmed", "preparing"]),
+      orderBy("createdAt", "asc")
+    );
+  }, []);
+
+  // Set up realtime listener with debouncing and proper cleanup
   useEffect(() => {
-    if (!initialData || loadingInitial) return;
+    if (!initialData || loadingInitial || !setupRealtimeListenerRef.current)
+      return;
 
     let isSubscribed = true;
     let debounceTimeout: NodeJS.Timeout | null = null;
 
+    // Memoize the orders query
+    const ordersQuery = createOrdersQuery(db);
+
     const unsubscribe = setupRealtimeListenerRef.current(
       (callback: (data: Order[]) => void) => {
-        const ordersQuery = query(
-          collection(db, "orders"),
-          where("status", "in", ["pending", "confirmed", "preparing"]),
-          orderBy("createdAt", "asc")
-        );
-
         return onSnapshot(
           ordersQuery,
           (snapshot) => {
@@ -243,7 +280,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
               } as Order;
             });
 
-            // CRITICAL FIX: Debounce real-time updates to prevent aggressive processing
+            // Debounce real-time updates to prevent aggressive processing
             if (debounceTimeout) {
               clearTimeout(debounceTimeout);
             }
@@ -255,7 +292,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
           },
           (error) => {
             if (!isSubscribed) return;
-            console.error("❌ Realtime listener error:", error);
+            console.error("? Realtime listener error:", error);
             toast.error("Fehler bei der Echtzeitaktualisierung");
           }
         );
@@ -263,7 +300,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
       (orders: Order[]) => {
         if (!isSubscribed || !menuItemsRef.current.length) return orders;
 
-        // CRITICAL FIX: Use stored menu items instead of initialData
+        // Use stored menu items instead of initialData
         processOrdersWithMenuItems(orders, menuItemsRef.current);
         return orders;
       }
@@ -278,58 +315,68 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
         unsubscribe();
       }
     };
-  }, [initialData, loadingInitial]);
+  }, [
+    initialData,
+    loadingInitial,
+    db,
+    createOrdersQuery,
+    processOrdersWithMenuItems,
+  ]);
 
-  // CRITICAL FIX: Optimized order completion without full data reload
-  const handleCompleteItem = async (orderId: string) => {
-    if (completingOrders.has(orderId)) return;
+  // Optimized order completion without full data reload
+  const handleCompleteItem = useCallback(
+    async (orderId: string) => {
+      if (completingOrders.has(orderId)) return;
 
-    setCompletingOrders((prev) => new Set(prev).add(orderId));
+      setCompletingOrders((prev) => new Set(prev).add(orderId));
 
-    try {
-      await OrderService.updateOrderStatus(orderId, "ready");
-      toast.success("Bestellung abgeschlossen");
+      try {
+        await OrderService.updateOrderStatus(orderId, "ready");
+        toast.success("Bestellung abgeschlossen");
 
-      // CRITICAL FIX: Don't reload all data, just let real-time listener handle it
-      // The real-time listener will automatically update the UI
-    } catch (error) {
-      console.error("❌ Error completing order:", error);
-      toast.error("Fehler beim Abschließen der Bestellung");
-    } finally {
-      setCompletingOrders((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(orderId);
-        return newSet;
-      });
-    }
-  };
+        // Don't reload all data, just let real-time listener handle it
+      } catch (error) {
+        console.error("? Error completing order:", error);
+        toast.error("Fehler beim Abschlie�en der Bestellung");
+      } finally {
+        setCompletingOrders((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(orderId);
+          return newSet;
+        });
+      }
+    },
+    [completingOrders]
+  );
 
-  // CRITICAL FIX: Optimized preparation start without full data reload
-  const handleStartPreparing = async (orderId: string) => {
-    if (completingOrders.has(orderId)) return;
+  // Optimized preparation start without full data reload
+  const handleStartPreparing = useCallback(
+    async (orderId: string) => {
+      if (completingOrders.has(orderId)) return;
 
-    setCompletingOrders((prev) => new Set(prev).add(orderId));
+      setCompletingOrders((prev) => new Set(prev).add(orderId));
 
-    try {
-      await OrderService.updateOrderStatus(orderId, "preparing");
-      toast.success("Zubereitung gestartet");
+      try {
+        await OrderService.updateOrderStatus(orderId, "preparing");
+        toast.success("Zubereitung gestartet");
 
-      // CRITICAL FIX: Don't reload all data, just let real-time listener handle it
-      // The real-time listener will automatically update the UI
-    } catch (error) {
-      console.error("❌ Error starting preparation:", error);
-      toast.error("Fehler beim Starten der Zubereitung");
-    } finally {
-      setCompletingOrders((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(orderId);
-        return newSet;
-      });
-    }
-  };
+        // Don't reload all data, just let real-time listener handle it
+      } catch (error) {
+        console.error("? Error starting preparation:", error);
+        toast.error("Fehler beim Starten der Zubereitung");
+      } finally {
+        setCompletingOrders((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(orderId);
+          return newSet;
+        });
+      }
+    },
+    [completingOrders]
+  );
 
-  // Utility functions for order priority and formatting
-  const getOrderPriority = (createdAt: any) => {
+  // Memoized utility functions for order priority and formatting
+  const getOrderPriority = useCallback((createdAt: unknown) => {
     const now = new Date();
     const orderTime = safeToDateWithFallback(createdAt);
     const diffMinutes = Math.floor(
@@ -339,9 +386,9 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
     if (diffMinutes > 20) return "urgent";
     if (diffMinutes > 10) return "high";
     return "normal";
-  };
+  }, []);
 
-  const getPriorityStyles = (priority: string) => {
+  const getPriorityStyles = useCallback((priority: string) => {
     switch (priority) {
       case "urgent":
         return "bg-red-100 border-red-300 text-red-800";
@@ -350,18 +397,18 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
       default:
         return "bg-blue-100 border-blue-300 text-blue-800";
     }
-  };
+  }, []);
 
-  const formatWaitTime = (createdAt: any) => {
+  const formatWaitTime = useCallback((createdAt: unknown) => {
     const now = new Date();
     const orderTime = safeToDateWithFallback(createdAt);
     const diffMinutes = Math.floor(
       (now.getTime() - orderTime.getTime()) / (1000 * 60)
     );
     return `${diffMinutes} min`;
-  };
+  }, []);
 
-  const getPriorityText = (priority: string) => {
+  const getPriorityText = useCallback((priority: string) => {
     switch (priority) {
       case "urgent":
         return "DRINGEND";
@@ -370,22 +417,22 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
       default:
         return "NORMAL";
     }
-  };
+  }, []);
 
-  const getStatusText = (status: string) => {
+  const getStatusText = useCallback((status: string) => {
     switch (status) {
       case "pending":
         return "Wartend";
       case "confirmed":
-        return "Bestätigt";
+        return "Best�tigt";
       case "preparing":
         return "In Zubereitung";
       default:
         return status;
     }
-  };
+  }, []);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch (status) {
       case "pending":
         return "bg-yellow-100 text-yellow-800";
@@ -396,10 +443,10 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
       default:
         return "bg-gray-100 text-gray-800";
     }
-  };
+  }, []);
 
-  // Order card component
-  const OrderCard = ({ order }: { order: OrderWithItem }) => {
+  // Extract OrderCard as a memoized component to prevent unnecessary re-renders
+  const OrderCard = React.memo(({ order }: { order: OrderWithItem }) => {
     const priority = getOrderPriority(order.createdAt);
     const isCompleting = completingOrders.has(order.id);
 
@@ -432,7 +479,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
 
         <div className="mb-3">
           <div className="flex items-center space-x-2 mb-1">
-            {order.currentItem.category === "drinks" ? (
+            {CATEGORIES.DRINKS.has(order.currentItem.category) ? (
               <Coffee className="w-5 h-5 text-blue-600" />
             ) : (
               <Flame className="w-5 h-5 text-orange-600" />
@@ -484,7 +531,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
               ) : (
                 <>
                   <CheckCircle className="w-4 h-4 mr-1 inline" />
-                  Abschließen
+                  Abschlie�en
                 </>
               )}
             </button>
@@ -500,7 +547,16 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
         </div>
       </div>
     );
-  };
+  });
+
+  // Ensure the component has a display name for better debugging
+  OrderCard.displayName = "OrderCard";
+
+  // Calculate total orders once to avoid recalculation in render
+  const totalOrders = useMemo(
+    () => drinkOrders.length + shishaOrders.length,
+    [drinkOrders.length, shishaOrders.length]
+  );
 
   // Handle loading states
   if (loadingInitial) {
@@ -534,16 +590,14 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
     return (
       <div className="p-6">
         <NoDataEmptyState
-          title="Keine Daten verfügbar"
-          description="Es sind keine Menüdaten oder Bestellungen vorhanden."
+          title="Keine Daten verf�gbar"
+          description="Es sind keine Men�daten oder Bestellungen vorhanden."
           onRefresh={reloadInitialData}
           refreshing={loadingInitial}
         />
       </div>
     );
   }
-
-  const totalOrders = drinkOrders.length + shishaOrders.length;
 
   return (
     <div className="p-6">
@@ -587,7 +641,7 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
         <div>
           <h2 className="text-xl font-semibold mb-4 flex items-center">
             <Coffee className="w-6 h-6 mr-2 text-blue-600" />
-            Getränke ({drinkOrders.length})
+            Getr�nke ({drinkOrders.length})
           </h2>
           <div className="space-y-4">
             {drinkOrders.length > 0 ? (
@@ -599,8 +653,8 @@ const BarOperations: React.FC<BarOperationsProps> = () => {
               ))
             ) : (
               <NoDataEmptyState
-                title="Keine Getränkebestellungen"
-                description="Derzeit gibt es keine offenen Getränkebestellungen."
+                title="Keine Getr�nkebestellungen"
+                description="Derzeit gibt es keine offenen Getr�nkebestellungen."
               />
             )}
           </div>
